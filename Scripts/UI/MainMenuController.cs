@@ -25,7 +25,9 @@ public partial class MainMenuController : Control
 
     private void OnPlayPressed()
     {
-        GD.Print("[MainMenu] Play button pressed - emitting PlayPressed signal");
+        GD.Print("[MainMenu] ===== PLAY BUTTON CLICKED =====");
+        GD.Print("[MainMenu] About to emit PlayPressed signal...");
         EmitSignal(SignalName.PlayPressed);
+        GD.Print("[MainMenu] PlayPressed signal emitted successfully");
     }
 }
