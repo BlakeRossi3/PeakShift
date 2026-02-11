@@ -8,30 +8,34 @@ public static class PhysicsConstants
 {
     // ── Gravity ──────────────────────────────────────────────────────
     /// <summary>Gravitational acceleration (px/s^2). Tuned for 2D at ~60fps.</summary>
-    public const float Gravity = 1800f;
+    public const float Gravity = 2200f;
+
+    /// <summary>
+    /// Gravity multiplier when traveling uphill (slope angle negative).
+    /// Reduces deceleration on inclines so player carries momentum over small hills.
+    /// 0.35 = only 35% of gravity opposes the player going uphill.
+    /// </summary>
+    public const float UphillGravityScale = 0.35f;
 
     // ── Drag & Resistance ────────────────────────────────────────────
     /// <summary>Base aerodynamic drag coefficient. Applied as: drag = coeff * v^2.</summary>
-    public const float BaseDragCoefficient = 0.0008f;
+    public const float BaseDragCoefficient = 0.0004f;
 
     /// <summary>Rolling resistance (constant force opposing motion, px/s^2).</summary>
-    public const float BaseRollingResistance = 15f;
+    public const float BaseRollingResistance = 8f;
 
     /// <summary>Air drag while airborne (much lower than ground drag).</summary>
-    public const float AirDragCoefficient = 0.0002f;
+    public const float AirDragCoefficient = 0.00008f;
 
     // ── Speed Limits ─────────────────────────────────────────────────
-    /// <summary>Minimum speed before stall detection on flat/uphill (px/s).</summary>
-    public const float StallSpeed = 20f;
-
-    /// <summary>Absolute minimum speed on downhill (prevents full stop on gentle downs).</summary>
-    public const float MinDownhillSpeed = 50f;
+    /// <summary>Absolute minimum speed — player always moves forward at least this fast (px/s).</summary>
+    public const float MinimumSpeed = 100f;
 
     /// <summary>Global terminal velocity cap (px/s).</summary>
-    public const float TerminalVelocity = 1200f;
+    public const float TerminalVelocity = 1800f;
 
     /// <summary>Starting speed for new runs (px/s).</summary>
-    public const float StartingSpeed = 250f;
+    public const float StartingSpeed = 350f;
 
     // ── Tuck Modifiers ───────────────────────────────────────────────
     /// <summary>Drag multiplier when tucking (0.0–1.0, lower = less drag).</summary>
@@ -51,13 +55,30 @@ public static class PhysicsConstants
 
     // ── Jump / Airborne ──────────────────────────────────────────────
     /// <summary>Minimum speed required to get any meaningful launch (px/s).</summary>
-    public const float MinLaunchSpeed = 150f;
+    public const float MinLaunchSpeed = 200f;
 
     /// <summary>Launch angle is derived from terrain normal. This scales the vertical component.</summary>
     public const float LaunchAngleScale = 1.0f;
 
-    /// <summary>Fall death Y threshold (px below starting ground).</summary>
-    public const float FallDeathY = 1500f;
+    /// <summary>How far below the terrain surface (px) before fall death triggers.</summary>
+    public const float FallDeathBelowTerrain = 800f;
+
+    // ── Terrain Hugging & Centripetal Launch ─────────────────────────
+    /// <summary>
+    /// Max distance (px) the player can be from the terrain surface and still snap back.
+    /// Keeps the player glued over small bumps and undulations.
+    /// </summary>
+    public const float GroundSnapDistance = 50f;
+
+    /// <summary>Sampling delta (px) for computing terrain curvature via finite differences.</summary>
+    public const float CurvatureSampleDelta = 16f;
+
+    /// <summary>
+    /// Multiplier on gravity for the centripetal launch threshold.
+    /// Lower = player launches more easily from convex crests.
+    /// At 0.7, the player detaches when centripetal force reaches 70% of gravity.
+    /// </summary>
+    public const float LaunchCentripetalScale = 0.7f;
 
     // ── Flip Mechanics ───────────────────────────────────────────────
     /// <summary>Base angular velocity for flips (radians/s). Scales with speed.</summary>
@@ -81,6 +102,9 @@ public static class PhysicsConstants
     /// <summary>Drag multiplier during post-flip bonus window.</summary>
     public const float FlipSuccessDragMultiplier = 0.5f;
 
+    /// <summary>Upward velocity impulse applied when initiating a flip (px/s). Acts like an air-jump.</summary>
+    public const float FlipLaunchImpulse = -350f;
+
     // ── Terrain Friction Coefficients ────────────────────────────────
     // These multiply rolling resistance. Lower = less friction = faster.
     public const float FrictionSnow = 0.7f;
@@ -97,12 +121,16 @@ public static class PhysicsConstants
     public const float CoyoteTime = 0.1f;
     public const float JumpBufferTime = 0.12f;
 
+    // ── Brake ──────────────────────────────────────────────────────────
+    /// <summary>Drag multiplier when braking (bike only). Much higher drag to slow down.</summary>
+    public const float BrakeDragMultiplier = 6.0f;
+
+    /// <summary>Minimum speed while braking — can't fully stop.</summary>
+    public const float BrakeMinSpeed = 40f;
+
     // ── Slope Thresholds ─────────────────────────────────────────────
     /// <summary>Minimum slope angle (degrees) to count as "downhill" for acceleration.</summary>
     public const float MinSlopeAngle = 2f;
-
-    /// <summary>Slope angle (degrees) at which uphill stall check begins.</summary>
-    public const float UphillStallAngle = 5f;
 
     // ── Vehicle Swap ─────────────────────────────────────────────────
     public const float SwapCooldown = 0.8f;

@@ -5,10 +5,14 @@ using PeakShift.Core;
 namespace PeakShift;
 
 /// <summary>
-/// Generates procedural terrain with rolling hills, manages chunk spawning and
-/// recycling, and selects terrain types (snow/dirt/ice/slush) based on the
-/// current biome. Each chunk is a StaticBody2D with Polygon2D visuals,
-/// Line2D surface edge, and CollisionPolygon2D physics.
+/// Run-based procedural terrain generator. Each "run" is a repeating cycle:
+///
+///   Descent (long downhill) → Ramp (smooth upward curve) → Gap (airborne)
+///
+/// The descent uses a cosine S-curve (flat → steep → flat at bottom).
+/// The ramp uses a cosine quarter-curve (flat at bottom → steep upward at lip).
+/// This guarantees every gap has a proper ski-jump ramp and the game always
+/// feels downhill. Terrain type changes between runs.
 /// </summary>
 public partial class TerrainManager : Node2D
 {
@@ -23,42 +27,83 @@ public partial class TerrainManager : Node2D
     // ── Exports ──────────────────────────────────────────────────
 
     [Export]
-    public int ChunksAhead { get; set; } = 8;
+    public int ChunksAhead { get; set; } = 10;
 
     [Export]
-    public float DespawnDistance { get; set; } = 1000f;
+    public float DespawnDistance { get; set; } = 2000f;
 
     /// <summary>Reference to the player node, set by GameManager.</summary>
     public CharacterBody2D PlayerNode { get; set; }
 
-    // ── Terrain generation constants ─────────────────────────────
+    // ── Constants ────────────────────────────────────────────────
 
-    private const float ChunkWidth = 512f;
-    private const float BaseGroundY = 300f;
-    private const float TerrainFillDepth = 700f;
-    private const int SurfaceResolution = 17;  // one point every 32px
-    private const float PointSpacing = ChunkWidth / (SurfaceResolution - 1);
+    private const float MaxChunkWidth = 512f;
+    private const float BaseGroundY = 200f;
+    private const float PointSpacing = 32f;
+    private const float SpawnX = -256f;
 
-    // Gap generation - gaps only spawn at end of downhill slopes (natural ski jumps)
-    private const float GapProbability = 0.20f;
-    private const float MinGapWidth = 200f;
-    private const float MaxGapWidth = 400f;
+    // Intro run — long steep descent (5-10s) flowing into first ramp launch
+    private const float IntroDescentLength = 5000f;
+    private const float IntroDescentDrop = 8000f;
+    private const float IntroRampLength = 500f;
+    private const float IntroRampRise = 350f;
+    private const float IntroGapWidth = 250f;
 
-    // Terrain section sizing - how many chunks before terrain type changes
-    private const int MinSectionChunks = 4;   // At least 4 chunks (~2048px) per section
-    private const int MaxSectionChunks = 8;   // Up to 8 chunks (~4096px) per section
-    private const int EarlyGameSectionChunks = 10; // Even bigger sections at start
+    // Extra downhill gradient added per pixel of descent length
+    private const float DownhillGradient = 0.14f;
+
+    // Gap sizing — base range before steepness scaling
+    private const float MinGapBase = 120f;
+    private const float MaxGapBase = 280f;
+
+    // Steepness-to-gap multiplier: gap = base + steepness * this
+    private const float GapSteepnessScale = 2000f;
+
+    // Fill polygon extends this far below the deepest surface point in each chunk
+    private const float FillDepthBelowSurface = 1000f;
+
+    // ── Run definition ──────────────────────────────────────────
+
+    private class TerrainRun
+    {
+        public float DescentStartX;
+        public float DescentStartY;
+        public float DescentLength;
+        public float DescentDrop;   // total Y increase (going down on screen)
+        public float RampLength;
+        public float RampRise;      // Y decrease (going up on screen)
+        public float GapWidth;
+        public TerrainType Type;
+
+        // Computed positions
+        public float RampStartX => DescentStartX + DescentLength;
+        public float RampStartY => DescentStartY + DescentDrop;
+        public float RampEndY => RampStartY - RampRise;
+        public float GapStartX => RampStartX + RampLength;
+        public float GapEndX => GapStartX + GapWidth;
+    }
 
     // ── State ────────────────────────────────────────────────────
 
     public List<ChunkInstance> ActiveChunks { get; } = new();
 
     private float _nextSpawnX;
-    private TerrainType _lastTerrainType;
-    private int _chunksUntilTypeChange;
     private readonly RandomNumberGenerator _rng = new();
-    private float _phaseOffset;
     private BiomeManager _biomeManager;
+
+    // Run generation
+    private readonly List<TerrainRun> _runs = new();
+    private float _nextRunStartX;
+    private float _nextRunStartY;
+    private int _runCount;
+    private int _currentSpawnRunIndex;
+
+    // Terrain type sections (multiple runs of same type)
+    private int _runsUntilTypeChange;
+    private TerrainType _currentSectionType = TerrainType.Snow;
+
+    // Chunk entry tracking (separate from generation)
+    private TerrainType _lastEnteredType = TerrainType.Snow;
 
     // ── Inner types ──────────────────────────────────────────────
 
@@ -76,16 +121,18 @@ public partial class TerrainManager : Node2D
     public override void _Ready()
     {
         _rng.Randomize();
-        _phaseOffset = _rng.RandfRange(0f, 1000f);
-        _nextSpawnX = -256f;
-        _lastTerrainType = TerrainType.Snow;
-        _chunksUntilTypeChange = EarlyGameSectionChunks;
+        _nextRunStartX = SpawnX;
+        _nextRunStartY = BaseGroundY;
+        _nextSpawnX = SpawnX;
+        _currentSpawnRunIndex = 0;
+        _runsUntilTypeChange = 0;
         _biomeManager = GetNodeOrNull<BiomeManager>("../BiomeManager");
 
+        EnsureRunsTo(_nextSpawnX + MaxChunkWidth * (ChunksAhead + 4));
         for (int i = 0; i < ChunksAhead; i++)
             SpawnNextChunk();
 
-        GD.Print("[TerrainManager] Initialized with procedural terrain");
+        GD.Print("[TerrainManager] Initialized with run-based terrain");
     }
 
     public override void _PhysicsProcess(double delta)
@@ -100,116 +147,221 @@ public partial class TerrainManager : Node2D
         CheckChunkEntry(playerX);
     }
 
-    // ── Chunk spawning ───────────────────────────────────────────
+    // ── Run generation ──────────────────────────────────────────
+
+    private void EnsureRunsTo(float worldX)
+    {
+        float target = worldX + MaxChunkWidth * (ChunksAhead + 4);
+        while (_runs.Count == 0 || _runs[^1].GapEndX < target)
+            GenerateNextRun();
+    }
+
+    private void GenerateNextRun()
+    {
+        bool isFirst = _runCount == 0;
+
+        // Terrain type — changes every few runs
+        if (_runsUntilTypeChange <= 0)
+        {
+            _currentSectionType = SelectTerrainType();
+            int min = _runCount < 3 ? 3 : 2;
+            int max = _runCount < 3 ? 5 : 4;
+            _runsUntilTypeChange = _rng.RandiRange(min, max);
+        }
+        _runsUntilTypeChange--;
+
+        float descentLength, descentBaseDrop, rampLength, rampRise, gapWidth;
+
+        if (isFirst)
+        {
+            // ── Intro run — long steep descent into first ramp ────
+            descentLength = IntroDescentLength;
+            descentBaseDrop = IntroDescentDrop;
+            rampLength = IntroRampLength;
+            rampRise = IntroRampRise;
+            gapWidth = IntroGapWidth;
+        }
+        else
+        {
+            // ── Regular runs (significantly steeper) ─────────────
+            descentLength = _rng.RandfRange(1200f, 3000f);
+            descentBaseDrop = _rng.RandfRange(500f, 1100f);
+            rampLength = _rng.RandfRange(200f, 550f);
+            rampRise = _rng.RandfRange(100f, 400f);
+
+            float rampSteepness = rampRise / rampLength;
+            float gapBase = _rng.RandfRange(MinGapBase, MaxGapBase);
+            gapWidth = gapBase + rampSteepness * GapSteepnessScale;
+        }
+
+        // Downhill gradient compounds steepness on longer descents
+        float descentDrop = descentBaseDrop + descentLength * DownhillGradient;
+
+        var run = new TerrainRun
+        {
+            DescentStartX = _nextRunStartX,
+            DescentStartY = _nextRunStartY,
+            DescentLength = descentLength,
+            DescentDrop = descentDrop,
+            RampLength = rampLength,
+            RampRise = rampRise,
+            GapWidth = gapWidth,
+            Type = _currentSectionType,
+        };
+        _runs.Add(run);
+
+        // Next run landing: slightly below the ramp lip
+        float landingOffset = _rng.RandfRange(30f, 80f);
+        _nextRunStartX = run.GapEndX;
+        _nextRunStartY = run.RampEndY + landingOffset;
+
+        _runCount++;
+    }
+
+    // ── Terrain height function ─────────────────────────────────
+
+    /// <summary>
+    /// Returns the terrain surface Y at the given world X position.
+    /// Uses run-based segments: cosine S-curve descents and cosine ramps.
+    /// Public so PlayerController can query slope geometry.
+    /// </summary>
+    public float GetTerrainHeight(float worldX)
+    {
+        EnsureRunsTo(worldX);
+
+        for (int i = 0; i < _runs.Count; i++)
+        {
+            var run = _runs[i];
+
+            if (worldX < run.DescentStartX) continue;
+            if (worldX >= run.GapEndX) continue;
+
+            // ── Descent: cosine S-curve (flat → steep → flat) ───
+            if (worldX < run.RampStartX)
+            {
+                float t = (worldX - run.DescentStartX) / run.DescentLength;
+                return run.DescentStartY + run.DescentDrop * (1f - Mathf.Cos(t * Mathf.Pi)) / 2f;
+            }
+
+            // ── Ramp: cosine quarter-curve (flat at bottom → steep upward at lip)
+            if (worldX < run.GapStartX)
+            {
+                float t = (worldX - run.RampStartX) / run.RampLength;
+                return run.RampStartY - run.RampRise * (1f - Mathf.Cos(t * Mathf.Pi / 2f));
+            }
+
+            // ── Gap: return lip height (used for fall detection) ─
+            return run.RampEndY;
+        }
+
+        return BaseGroundY;
+    }
+
+    /// <summary>
+    /// Returns the approximate terrain surface normal at a given world X position.
+    /// Computed by sampling two nearby points and finding the perpendicular.
+    /// Used by PlayerController for launch angle calculations.
+    /// </summary>
+    public Vector2 GetTerrainNormalAt(float worldX)
+    {
+        const float sampleDelta = 4f;
+        float yLeft = GetTerrainHeight(worldX - sampleDelta);
+        float yRight = GetTerrainHeight(worldX + sampleDelta);
+
+        Vector2 tangent = new Vector2(sampleDelta * 2f, yRight - yLeft).Normalized();
+        Vector2 normal = new Vector2(-tangent.Y, tangent.X);
+
+        if (normal.Y > 0f)
+            normal = -normal;
+
+        return normal;
+    }
+
+    /// <summary>
+    /// Returns the Y position of the terrain surface at the start of the world.
+    /// Used by PlayerController to position the player correctly on reset.
+    /// </summary>
+    public float GetStartingSurfaceY()
+    {
+        return GetTerrainHeight(SpawnX);
+    }
+
+    // ── Chunk spawning ──────────────────────────────────────────
 
     public void SpawnNextChunk()
     {
-        // Check if we should spawn a gap: only on downhill slopes (natural ski-jump ramps)
-        if (_nextSpawnX > 2000f && _rng.Randf() < GapProbability && IsSlopeDownhill(_nextSpawnX))
+        EnsureRunsTo(_nextSpawnX + MaxChunkWidth * ChunksAhead);
+
+        // Advance to the current run
+        while (_currentSpawnRunIndex < _runs.Count - 1
+               && _nextSpawnX >= _runs[_currentSpawnRunIndex].GapEndX)
         {
-            float gapWidth = _rng.RandfRange(MinGapWidth, MaxGapWidth);
+            _currentSpawnRunIndex++;
+        }
 
-            // First, spawn a short steep uphill ramp so players can be launched off it
-            float rampHeight = 220f; // steepness of the launch ramp
+        var run = _runs[_currentSpawnRunIndex];
 
-            var rampBody = new StaticBody2D();
-            rampBody.Position = new Vector2(_nextSpawnX, 0);
-            rampBody.ZIndex = -1;
-
-            var rampSurfacePoints = new Vector2[SurfaceResolution];
-            float baseHeight = GetTerrainHeight(_nextSpawnX);
-            for (int i = 0; i < SurfaceResolution; i++)
-            {
-                float localX = i * PointSpacing;
-                // create a short, steep uphill that rises toward the end of the chunk
-                float t = (float)i / (SurfaceResolution - 1);
-                rampSurfacePoints[i] = new Vector2(localX, baseHeight - rampHeight * t);
-            }
-
-            var rampPoly = new Vector2[SurfaceResolution + 2];
-            for (int i = 0; i < SurfaceResolution; i++)
-                rampPoly[i] = rampSurfacePoints[i];
-            rampPoly[SurfaceResolution] = new Vector2(ChunkWidth, TerrainFillDepth);
-            rampPoly[SurfaceResolution + 1] = new Vector2(0, TerrainFillDepth);
-
-            var rampPolygon = new Polygon2D
-            {
-                Polygon = rampPoly,
-                Color = GetFillColor(_lastTerrainType)
-            };
-            rampBody.AddChild(rampPolygon);
-
-            var rampLine = new Line2D();
-            rampLine.Points = rampSurfacePoints;
-            rampLine.Width = 4f;
-            rampLine.DefaultColor = GetSurfaceColor(_lastTerrainType);
-            rampBody.AddChild(rampLine);
-
-            var rampCollision = new CollisionPolygon2D { Polygon = rampPoly };
-            rampBody.AddChild(rampCollision);
-
-            AddChild(rampBody);
-
+        // ── In a gap: create gap instance and skip past it ──────
+        if (_nextSpawnX >= run.GapStartX && _nextSpawnX < run.GapEndX)
+        {
+            float gapRemaining = run.GapEndX - _nextSpawnX;
             ActiveChunks.Add(new ChunkInstance
             {
-                Type = _lastTerrainType,
+                Type = run.Type,
                 WorldX = _nextSpawnX,
-                Width = ChunkWidth,
-                SceneNode = rampBody,
-                IsGap = false
-            });
-
-            _nextSpawnX += ChunkWidth;
-
-            // Then add the actual empty gap after the ramp
-            ActiveChunks.Add(new ChunkInstance
-            {
-                Type = TerrainType.Snow,
-                WorldX = _nextSpawnX,
-                Width = gapWidth,
+                Width = gapRemaining,
                 SceneNode = null,
                 IsGap = true
             });
-
-            // Force terrain type to change after the gap so players often have to swap in-air
-            _chunksUntilTypeChange = 0;
-
-            _nextSpawnX += gapWidth;
+            _nextSpawnX = run.GapEndX;
             return;
         }
 
-        // Terrain type only changes after enough chunks in current section
-        if (_chunksUntilTypeChange <= 0)
+        // ── Determine chunk width (shorter if gap is nearby) ────
+        float distToGap = run.GapStartX - _nextSpawnX;
+        float chunkWidth = Mathf.Min(MaxChunkWidth, distToGap);
+
+        // Skip tiny slivers
+        if (chunkWidth < 32f)
         {
-            _lastTerrainType = SelectTerrainType();
-            // Bigger sections early, smaller sections later
-            int min = _nextSpawnX < 5000f ? EarlyGameSectionChunks : MinSectionChunks;
-            int max = _nextSpawnX < 5000f ? EarlyGameSectionChunks + 4 : MaxSectionChunks;
-            _chunksUntilTypeChange = _rng.RandiRange(min, max);
+            _nextSpawnX = run.GapStartX;
+            return;
         }
 
-        var terrainType = _lastTerrainType;
-        _chunksUntilTypeChange--;
+        int resolution = Mathf.Max(3, (int)(chunkWidth / PointSpacing) + 1);
+        CreateTerrainChunk(_nextSpawnX, chunkWidth, resolution, run.Type);
+        _nextSpawnX += chunkWidth;
+    }
 
+    private void CreateTerrainChunk(float worldX, float width, int resolution, TerrainType terrainType)
+    {
         var body = new StaticBody2D();
-        body.Position = new Vector2(_nextSpawnX, 0);
+        body.Position = new Vector2(worldX, 0);
         body.ZIndex = -1;
 
+        float spacing = width / (resolution - 1);
+
         // Generate surface height points
-        var surfacePoints = new Vector2[SurfaceResolution];
-        for (int i = 0; i < SurfaceResolution; i++)
+        var surfacePoints = new Vector2[resolution];
+        float maxSurfaceY = float.MinValue;
+        for (int i = 0; i < resolution; i++)
         {
-            float localX = i * PointSpacing;
-            float worldX = _nextSpawnX + localX;
-            surfacePoints[i] = new Vector2(localX, GetTerrainHeight(worldX));
+            float localX = i * spacing;
+            float wx = worldX + localX;
+            float y = GetTerrainHeight(wx);
+            surfacePoints[i] = new Vector2(localX, y);
+            if (y > maxSurfaceY) maxSurfaceY = y;
         }
 
+        // Dynamic fill depth — always well below the deepest surface point
+        float fillDepth = maxSurfaceY + FillDepthBelowSurface;
+
         // Build closed polygon: surface points + deep fill
-        var polyPoints = new Vector2[SurfaceResolution + 2];
-        for (int i = 0; i < SurfaceResolution; i++)
+        var polyPoints = new Vector2[resolution + 2];
+        for (int i = 0; i < resolution; i++)
             polyPoints[i] = surfacePoints[i];
-        polyPoints[SurfaceResolution] = new Vector2(ChunkWidth, TerrainFillDepth);
-        polyPoints[SurfaceResolution + 1] = new Vector2(0, TerrainFillDepth);
+        polyPoints[resolution] = new Vector2(width, fillDepth);
+        polyPoints[resolution + 1] = new Vector2(0, fillDepth);
 
         // Visual fill
         var polygon = new Polygon2D
@@ -235,16 +387,14 @@ public partial class TerrainManager : Node2D
         ActiveChunks.Add(new ChunkInstance
         {
             Type = terrainType,
-            WorldX = _nextSpawnX,
-            Width = ChunkWidth,
+            WorldX = worldX,
+            Width = width,
             SceneNode = body,
             IsGap = false
         });
-
-        _nextSpawnX += ChunkWidth;
     }
 
-    // ── Recycling ────────────────────────────────────────────────
+    // ── Recycling ───────────────────────────────────────────────
 
     public void RecycleChunks(float playerX)
     {
@@ -255,6 +405,13 @@ public partial class TerrainManager : Node2D
                 chunk.SceneNode?.QueueFree();
             return shouldRemove;
         });
+
+        // Trim old runs the player has long passed
+        while (_runs.Count > 2 && _runs[0].GapEndX < playerX - DespawnDistance)
+        {
+            _runs.RemoveAt(0);
+            _currentSpawnRunIndex = Mathf.Max(0, _currentSpawnRunIndex - 1);
+        }
     }
 
     /// <summary>Clear all chunks and reset for a new run.</summary>
@@ -263,74 +420,22 @@ public partial class TerrainManager : Node2D
         foreach (var chunk in ActiveChunks)
             chunk.SceneNode?.QueueFree();
         ActiveChunks.Clear();
+        _runs.Clear();
 
-        _nextSpawnX = -256f;
-        _lastTerrainType = TerrainType.Snow;
-        _chunksUntilTypeChange = EarlyGameSectionChunks;
-        _phaseOffset = _rng.RandfRange(0f, 1000f); // new terrain each run
+        _nextRunStartX = SpawnX;
+        _nextRunStartY = BaseGroundY;
+        _nextSpawnX = SpawnX;
+        _currentSpawnRunIndex = 0;
+        _runCount = 0;
+        _runsUntilTypeChange = 0;
+        _lastEnteredType = TerrainType.Snow;
 
+        EnsureRunsTo(_nextSpawnX + MaxChunkWidth * (ChunksAhead + 4));
         for (int i = 0; i < ChunksAhead; i++)
             SpawnNextChunk();
     }
 
-    // ── Terrain height function ──────────────────────────────────
-
-    /// <summary>
-    /// Returns the terrain surface Y at the given world X position.
-    /// Uses layered sine waves for dramatic hills with screen-height variation.
-    /// Creates larger hills with bigger drops, fewer small bumps.
-    /// Public so PlayerController can query slope geometry.
-    /// </summary>
-    public float GetTerrainHeight(float worldX)
-    {
-        // Large hills with screen-height variation (removed small bumps for smoother, bigger hills)
-        float variation =
-            Mathf.Sin(worldX * 0.0015f + _phaseOffset) * 280f +      // Very large, slow hills with big drops
-            Mathf.Sin(worldX * 0.004f + _phaseOffset * 1.7f) * 150f; // Medium-large hills
-
-        // Blend from flat near x=0 to full variation by x=400
-        float blend = Mathf.Clamp(worldX / 400f, 0f, 1f);
-
-        return BaseGroundY + variation * blend;
-    }
-
-    /// <summary>
-    /// Returns the approximate terrain surface normal at a given world X position.
-    /// Computed by sampling two nearby points and finding the perpendicular.
-    /// Used by PlayerController for launch angle calculations when floor normal
-    /// is unavailable (e.g. at ramp edges).
-    /// </summary>
-    public Vector2 GetTerrainNormalAt(float worldX)
-    {
-        const float sampleDelta = 4f;
-        float yLeft = GetTerrainHeight(worldX - sampleDelta);
-        float yRight = GetTerrainHeight(worldX + sampleDelta);
-
-        // Tangent points right along the surface
-        Vector2 tangent = new Vector2(sampleDelta * 2f, yRight - yLeft).Normalized();
-
-        // Normal is perpendicular to tangent, pointing "up" (negative Y in Godot)
-        Vector2 normal = new Vector2(-tangent.Y, tangent.X);
-
-        // Ensure normal points upward (Y < 0)
-        if (normal.Y > 0f)
-            normal = -normal;
-
-        return normal;
-    }
-
-    /// <summary>
-    /// Returns true if the terrain at worldX is going downhill (Y increasing = lower on screen).
-    /// Gaps should only spawn here — creates natural ski-jump ramps.
-    /// </summary>
-    private bool IsSlopeDownhill(float worldX)
-    {
-        float heightHere = GetTerrainHeight(worldX);
-        float heightAhead = GetTerrainHeight(worldX - ChunkWidth);
-        return heightHere > heightAhead; // Y increases downward, so higher Y = lower elevation = downhill
-    }
-
-    // ── Terrain type selection ───────────────────────────────────
+    // ── Terrain type selection ──────────────────────────────────
 
     private TerrainType SelectTerrainType()
     {
@@ -351,7 +456,7 @@ public partial class TerrainManager : Node2D
         return TerrainType.Snow;
     }
 
-    // ── Chunk entry detection ────────────────────────────────────
+    // ── Chunk entry detection ───────────────────────────────────
 
     private void CheckChunkEntry(float playerX)
     {
@@ -360,9 +465,9 @@ public partial class TerrainManager : Node2D
             float chunkEnd = chunk.WorldX + chunk.Width;
             if (playerX >= chunk.WorldX && playerX < chunkEnd)
             {
-                if (chunk.Type != _lastTerrainType)
+                if (chunk.Type != _lastEnteredType)
                 {
-                    _lastTerrainType = chunk.Type;
+                    _lastEnteredType = chunk.Type;
                     EmitSignal(SignalName.TerrainChanged, (int)chunk.Type);
                 }
                 break;
@@ -370,7 +475,7 @@ public partial class TerrainManager : Node2D
         }
     }
 
-    // ── Terrain colors ───────────────────────────────────────────
+    // ── Terrain colors ──────────────────────────────────────────
 
     private static Color GetFillColor(TerrainType type) => type switch
     {

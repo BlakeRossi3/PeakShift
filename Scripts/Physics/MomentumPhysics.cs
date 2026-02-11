@@ -13,17 +13,18 @@ public static class MomentumPhysics
 
     /// <summary>
     /// Computes gravitational acceleration along the slope.
-    /// Positive slopeAngle = downhill (player accelerates).
-    /// Negative slopeAngle = uphill (player decelerates).
+    /// Positive slopeAngle = downhill (player accelerates with full gravity).
+    /// Negative slopeAngle = uphill (player decelerates with reduced gravity).
     ///
-    /// Formula: a_gravity = g * sin(theta)
-    /// Where theta is the signed slope angle in radians.
+    /// Uphill gravity is scaled by UphillGravityScale so the player carries
+    /// momentum over small hills instead of rapidly decelerating.
     /// </summary>
     /// <param name="slopeAngleRad">Signed slope angle in radians. Positive = downhill.</param>
     /// <returns>Acceleration component from gravity along slope (px/s^2).</returns>
     public static float GravitySlopeAcceleration(float slopeAngleRad)
     {
-        return PhysicsConstants.Gravity * Mathf.Sin(slopeAngleRad);
+        float gravityScale = slopeAngleRad < 0f ? PhysicsConstants.UphillGravityScale : 1.0f;
+        return PhysicsConstants.Gravity * Mathf.Sin(slopeAngleRad) * gravityScale;
     }
 
     /// <summary>
@@ -82,7 +83,7 @@ public static class MomentumPhysics
     public static float IntegrateSpeed(float currentSpeed, float acceleration, float dt, float terminalVelocity)
     {
         float newSpeed = currentSpeed + acceleration * dt;
-        return Mathf.Clamp(newSpeed, 0f, terminalVelocity);
+        return Mathf.Clamp(newSpeed, PhysicsConstants.MinimumSpeed, terminalVelocity);
     }
 
     // ── Jump / Airborne Physics ─────────────────────────────────────
@@ -137,8 +138,8 @@ public static class MomentumPhysics
         velocity.X -= airDrag * dt;
 
         // Ensure X never goes negative (player always moves forward)
-        if (velocity.X < PhysicsConstants.MinDownhillSpeed)
-            velocity.X = PhysicsConstants.MinDownhillSpeed;
+        if (velocity.X < PhysicsConstants.MinimumSpeed)
+            velocity.X = PhysicsConstants.MinimumSpeed;
 
         return velocity;
     }
@@ -290,5 +291,63 @@ public static class MomentumPhysics
             TerrainType.Ice => PhysicsConstants.DragModIce,
             _ => 1.0f
         };
+    }
+
+    // ── Terrain Curvature & Centripetal Launch ──────────────────────
+
+    /// <summary>
+    /// Computes the signed curvature of the terrain at a point using
+    /// three sampled heights (finite differences).
+    ///
+    /// κ = h''(x) / (1 + h'(x)²)^(3/2)
+    ///
+    /// Positive κ = convex crest (surface curves away from player, launch candidate).
+    /// Negative κ = concave valley (surface curves toward player, stay grounded).
+    /// </summary>
+    /// <param name="heightLeft">Terrain Y at (x - delta).</param>
+    /// <param name="heightCenter">Terrain Y at x.</param>
+    /// <param name="heightRight">Terrain Y at (x + delta).</param>
+    /// <param name="sampleDelta">Distance between sample points (px).</param>
+    /// <returns>Signed curvature (1/px). Positive = convex.</returns>
+    public static float ComputeTerrainCurvature(
+        float heightLeft, float heightCenter, float heightRight, float sampleDelta)
+    {
+        float firstDeriv = (heightRight - heightLeft) / (2f * sampleDelta);
+        float secondDeriv = (heightRight - 2f * heightCenter + heightLeft)
+                            / (sampleDelta * sampleDelta);
+
+        float denominator = Mathf.Pow(1f + firstDeriv * firstDeriv, 1.5f);
+        return secondDeriv / denominator;
+    }
+
+    /// <summary>
+    /// Determines whether the player should detach from the terrain surface
+    /// based on centripetal force vs gravity (Tiny Wings / Sonic style).
+    ///
+    /// On a convex crest with curvature κ, the player's speed creates centripetal
+    /// acceleration = v²κ. When this exceeds the gravity component pushing them
+    /// into the surface, they launch naturally.
+    ///
+    /// Condition: v²κ > gravity * gravityMultiplier * launchScale
+    /// </summary>
+    /// <param name="speed">Current scalar speed (px/s).</param>
+    /// <param name="curvature">Terrain curvature at player position (1/px).</param>
+    /// <param name="gravityMultiplier">Vehicle gravity multiplier.</param>
+    /// <returns>True if the player should launch from the surface.</returns>
+    public static bool ShouldLaunchFromSurface(float speed, float curvature, float gravityMultiplier)
+    {
+        // Only launch on convex surfaces (positive curvature in our coordinate system)
+        if (curvature <= 0f)
+            return false;
+
+        // Speed must exceed minimum launch threshold
+        if (speed < PhysicsConstants.MinLaunchSpeed)
+            return false;
+
+        float centripetalAccel = speed * speed * curvature;
+        float gravityThreshold = PhysicsConstants.Gravity * gravityMultiplier
+                                 * PhysicsConstants.LaunchCentripetalScale;
+
+        return centripetalAccel > gravityThreshold;
     }
 }
