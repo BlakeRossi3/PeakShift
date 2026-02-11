@@ -81,6 +81,11 @@ public partial class GameManager : Node
         if (_mainMenu != null)
         {
             _mainMenu.PlayPressed += StartGame;
+            GD.Print("[GameManager] Connected MainMenu.PlayPressed → StartGame");
+        }
+        else
+        {
+            GD.PrintErr("[GameManager] FAILED: MainMenu not found!");
         }
 
         // GameOver → GameManager
@@ -88,6 +93,11 @@ public partial class GameManager : Node
         {
             _gameOver.RetryPressed += StartGame;
             _gameOver.MenuPressed += ReturnToMenu;
+            GD.Print("[GameManager] Connected GameOver signals");
+        }
+        else
+        {
+            GD.PrintErr("[GameManager] FAILED: GameOver not found!");
         }
 
         // PauseMenu → GameManager
@@ -95,6 +105,11 @@ public partial class GameManager : Node
         {
             _pauseMenu.ResumePressed += ResumeGame;
             _pauseMenu.QuitPressed += ReturnToMenu;
+            GD.Print("[GameManager] Connected PauseMenu signals");
+        }
+        else
+        {
+            GD.PrintErr("[GameManager] FAILED: PauseMenu not found!");
         }
 
         // PlayerController → HUD (vehicle swap)
@@ -105,12 +120,18 @@ public partial class GameManager : Node
                 bool isBike = newState == (int)PlayerController.PlayerState.Biking;
                 _hud.UpdateVehicleIcon(isBike);
             };
+            GD.Print("[GameManager] Connected PlayerController.VehicleSwapped → HUD");
         }
 
         // PlayerController crash → GameManager end game
         if (_player != null)
         {
             _player.PlayerCrashed += EndGame;
+            GD.Print("[GameManager] Connected PlayerController.PlayerCrashed → EndGame");
+        }
+        else
+        {
+            GD.PrintErr("[GameManager] FAILED: PlayerController not found!");
         }
 
         // RunManager → HUD (score updates)
@@ -120,6 +141,7 @@ public partial class GameManager : Node
             {
                 _hud.UpdateScore(newScore, _runManager.Multiplier);
             };
+            GD.Print("[GameManager] Connected RunManager.ScoreUpdated → HUD");
         }
 
         // TerrainManager → PlayerController (terrain changes)
@@ -131,11 +153,13 @@ public partial class GameManager : Node
                 if (_runManager != null)
                     _runManager.CurrentTerrain = (TerrainType)newTerrainType;
             };
+            GD.Print("[GameManager] Connected TerrainManager.TerrainChanged → Player & RunManager");
         }
 
         // GameManager signals → UI visibility
         GameStarted += OnGameStarted;
         GameOver += OnGameOver;
+        GD.Print("[GameManager] Connected GameManager signals");
     }
 
     private void OnGameStarted()
@@ -146,10 +170,12 @@ public partial class GameManager : Node
         _biomeManager?.Reset();
 
         if (_mainMenu != null) _mainMenu.Visible = false;
+        if (_hud != null) _hud.Visible = true;
         if (_gameOver != null) _gameOver.Visible = false;
         if (_pauseMenu != null) _pauseMenu.Visible = false;
 
         _audioManager?.PlayMusic();
+        GD.Print("[GameManager] Game started - UI updated, music playing");
     }
 
     private void OnGameOver()
@@ -158,7 +184,9 @@ public partial class GameManager : Node
         {
             _gameOver.ShowScore(_runManager.Score);
         }
+        if (_hud != null) _hud.Visible = false;
         _audioManager?.StopMusic();
+        GD.Print("[GameManager] Game over - score shown, music stopped");
     }
 
     private void ReturnToMenu()
@@ -168,6 +196,7 @@ public partial class GameManager : Node
         EmitSignal(SignalName.StateChanged, (int)CurrentState);
 
         if (_mainMenu != null) _mainMenu.Visible = true;
+        if (_hud != null) _hud.Visible = false;
         if (_gameOver != null) _gameOver.Visible = false;
         if (_pauseMenu != null) _pauseMenu.Visible = false;
 
@@ -195,13 +224,17 @@ public partial class GameManager : Node
     public void StartGame()
     {
         if (CurrentState is not (GameState.Menu or GameState.GameOver))
+        {
+            GD.PrintErr($"[GameManager] StartGame() called but state is {CurrentState}, must be Menu or GameOver");
             return;
+        }
 
+        GD.Print("[GameManager] Starting game...");
         CurrentState = GameState.Playing;
         GetTree().Paused = false;
         EmitSignal(SignalName.GameStarted);
         EmitSignal(SignalName.StateChanged, (int)CurrentState);
-        GD.Print("[GameManager] Game started");
+        GD.Print("[GameManager] Game started - state changed to Playing");
     }
 
     public void PauseGame()

@@ -33,6 +33,8 @@ public partial class HUDController : CanvasLayer
         {
             _swapButton.Pressed += OnSwapPressed;
         }
+
+        GD.Print("[HUD] Initialized - found labels and buttons");
     }
 
     public override void _Process(double delta)

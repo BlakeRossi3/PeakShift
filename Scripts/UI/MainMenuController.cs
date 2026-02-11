@@ -15,12 +15,17 @@ public partial class MainMenuController : Control
         if (_playButton != null)
         {
             _playButton.Pressed += OnPlayPressed;
+            GD.Print("[MainMenu] PlayButton found and connected successfully");
+        }
+        else
+        {
+            GD.PrintErr("[MainMenu] FAILED: PlayButton not found! Unique name '%PlayButton' may not exist");
         }
     }
 
     private void OnPlayPressed()
     {
-        GD.Print("[MainMenu] Play pressed");
+        GD.Print("[MainMenu] Play button pressed - emitting PlayPressed signal");
         EmitSignal(SignalName.PlayPressed);
     }
 }
