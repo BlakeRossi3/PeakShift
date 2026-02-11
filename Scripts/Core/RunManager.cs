@@ -1,56 +1,89 @@
 using Godot;
+using PeakShift.Core;
+using PeakShift.UI;
 
 namespace PeakShift;
 
 /// <summary>
 /// Tracks all run data: distance travelled, score, multiplier, and current terrain.
-/// Attach as a child of GameManager or the main scene.
+/// Drives distance/score updates each physics frame when the game is playing.
 /// </summary>
 public partial class RunManager : Node
 {
     // ── Signals ──────────────────────────────────────────────────
 
-    /// <summary>Emitted whenever the player's score changes.</summary>
     [Signal]
     public delegate void ScoreUpdatedEventHandler(int newScore);
 
     // ── Exports ──────────────────────────────────────────────────
 
-    /// <summary>Base forward speed used to compute distance per second.</summary>
     [Export]
     public float BaseSpeed { get; set; } = 300f;
 
+    /// <summary>Points awarded per 100 pixels of distance.</summary>
+    [Export]
+    public int PointsPer100px { get; set; } = 10;
+
     // ── Properties ───────────────────────────────────────────────
 
-    /// <summary>Total distance the player has travelled this run (in pixels).</summary>
     public float Distance { get; private set; }
-
-    /// <summary>Current score for this run.</summary>
     public int Score { get; private set; }
-
-    /// <summary>Score multiplier (e.g. perfect-swap streaks).</summary>
     public float Multiplier { get; set; } = 1.0f;
-
-    /// <summary>The terrain type currently under the player.</summary>
     public TerrainType CurrentTerrain { get; set; } = TerrainType.Snow;
+
+    // ── Cached references ────────────────────────────────────────
+
+    private GameManager _gameManager;
+    private BiomeManager _biomeManager;
+    private HUDController _hud;
+    private float _distanceSinceLastScore;
+
+    // ── Lifecycle ────────────────────────────────────────────────
+
+    public override void _Ready()
+    {
+        _gameManager = GetNodeOrNull<GameManager>("../GameManager");
+        _biomeManager = GetNodeOrNull<BiomeManager>("../BiomeManager");
+        _hud = GetNodeOrNull<HUDController>("../HUD");
+    }
+
+    public override void _PhysicsProcess(double delta)
+    {
+        if (_gameManager == null || _gameManager.CurrentState != GameManager.GameState.Playing)
+            return;
+
+        float dt = (float)delta;
+        UpdateDistance(dt);
+
+        // Award score based on distance
+        _distanceSinceLastScore += dt * BaseSpeed;
+        if (_distanceSinceLastScore >= 100f)
+        {
+            int chunks = (int)(_distanceSinceLastScore / 100f);
+            AddScore(chunks * PointsPer100px);
+            _distanceSinceLastScore -= chunks * 100f;
+        }
+
+        // Update HUD distance display
+        _hud?.UpdateDistance(Distance);
+
+        // Drive biome transitions
+        _biomeManager?.UpdateDistance(Distance);
+    }
 
     // ── Public API ───────────────────────────────────────────────
 
-    /// <summary>Reset all run data for a fresh run.</summary>
     public void ResetRun()
     {
         Distance = 0f;
         Score = 0;
         Multiplier = 1.0f;
         CurrentTerrain = TerrainType.Snow;
+        _distanceSinceLastScore = 0f;
         EmitSignal(SignalName.ScoreUpdated, Score);
         GD.Print("[RunManager] Run reset");
     }
 
-    /// <summary>
-    /// Add points to the score, scaled by the current multiplier.
-    /// </summary>
-    /// <param name="points">Base points before multiplier.</param>
     public void AddScore(int points)
     {
         int gained = Mathf.RoundToInt(points * Multiplier);
@@ -58,11 +91,6 @@ public partial class RunManager : Node
         EmitSignal(SignalName.ScoreUpdated, Score);
     }
 
-    /// <summary>
-    /// Increment distance based on elapsed delta and speed.
-    /// Call this every physics frame.
-    /// </summary>
-    /// <param name="delta">Frame delta time in seconds.</param>
     public void UpdateDistance(float delta)
     {
         Distance += delta * BaseSpeed;

@@ -21,23 +21,15 @@ public partial class PauseMenuController : Control
         Visible = false;
     }
 
-    public void Toggle()
-    {
-        Visible = !Visible;
-        GetTree().Paused = Visible;
-    }
-
     private void OnResumePressed()
     {
         GD.Print("[PauseMenu] Resumed");
-        Toggle();
         EmitSignal(SignalName.ResumePressed);
     }
 
     private void OnQuitPressed()
     {
         GD.Print("[PauseMenu] Quit pressed");
-        GetTree().Paused = false;
         EmitSignal(SignalName.QuitPressed);
     }
 }

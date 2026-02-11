@@ -1,11 +1,15 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://Scripts/Core/GameManager.cs" id="1"]
 [ext_resource type="Script" path="res://Scripts/Core/RunManager.cs" id="2"]
-[ext_resource type="Script" path="res://Scripts/Player/PlayerController.cs" id="3"]
 [ext_resource type="Script" path="res://Scripts/Terrain/TerrainManager.cs" id="4"]
 [ext_resource type="Script" path="res://Scripts/Audio/AudioManager.cs" id="5"]
-[ext_resource type="Texture2D" path="res://Assets/Art/Characters/player_placeholder.png" id="6"]
+[ext_resource type="PackedScene" path="res://Scenes/Player/Player.tscn" id="6"]
+[ext_resource type="Script" path="res://Scripts/Core/BiomeManager.cs" id="7"]
+[ext_resource type="PackedScene" path="res://Scenes/UI/HUD.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://Scenes/UI/MainMenu.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://Scenes/UI/GameOver.tscn" id="10"]
+[ext_resource type="PackedScene" path="res://Scenes/UI/PauseMenu.tscn" id="11"]
 
 [node name="Main" type="Node2D"]
 
@@ -18,11 +22,10 @@ script = ExtResource("2")
 [node name="AudioManager" type="Node" parent="."]
 script = ExtResource("5")
 
-[node name="Player" type="CharacterBody2D" parent="."]
-script = ExtResource("3")
+[node name="BiomeManager" type="Node" parent="."]
+script = ExtResource("7")
 
-[node name="Sprite2D" type="Sprite2D" parent="Player"]
-texture = ExtResource("6")
+[node name="Player" parent="." instance=ExtResource("6")]
 
 [node name="PlayerCamera" type="Camera2D" parent="Player"]
 position_smoothing_enabled = true
@@ -30,3 +33,13 @@ position_smoothing_speed = 5.0
 
 [node name="TerrainManager" type="Node2D" parent="."]
 script = ExtResource("4")
+
+[node name="HUD" parent="." instance=ExtResource("8")]
+
+[node name="MainMenu" parent="." instance=ExtResource("9")]
+
+[node name="GameOver" parent="." instance=ExtResource("10")]
+visible = false
+
+[node name="PauseMenu" parent="." instance=ExtResource("11")]
+visible = false

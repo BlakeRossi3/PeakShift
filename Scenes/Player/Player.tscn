@@ -1,16 +1,35 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://Scripts/Player/PlayerController.cs" id="1"]
 [ext_resource type="Texture2D" path="res://Assets/Art/Characters/player_placeholder.png" id="2"]
+[ext_resource type="Script" path="res://Scripts/Vehicles/BikeController.cs" id="3"]
+[ext_resource type="Texture2D" path="res://Assets/Art/Vehicles/bike_placeholder.png" id="4"]
+[ext_resource type="Script" path="res://Scripts/Vehicles/SkiController.cs" id="5"]
+[ext_resource type="Texture2D" path="res://Assets/Art/Vehicles/skis_placeholder.png" id="6"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
 size = Vector2(32, 64)
 
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1")
+BikeNode = NodePath("Bike")
+SkiNode = NodePath("Skis")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 texture = ExtResource("2")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("RectangleShape2D_1")
+
+[node name="Bike" type="Node2D" parent="."]
+script = ExtResource("3")
+
+[node name="Sprite2D" type="Sprite2D" parent="Bike"]
+texture = ExtResource("4")
+
+[node name="Skis" type="Node2D" parent="."]
+visible = false
+script = ExtResource("5")
+
+[node name="Sprite2D" type="Sprite2D" parent="Skis"]
+texture = ExtResource("6")

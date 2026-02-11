@@ -33,6 +33,9 @@ public partial class TerrainManager : Node2D
     [Export]
     public TerrainChunk[] AvailableChunks { get; set; } = System.Array.Empty<TerrainChunk>();
 
+    /// <summary>Reference to the player node, set by GameManager.</summary>
+    public CharacterBody2D PlayerNode { get; set; }
+
     // ── State ────────────────────────────────────────────────────
 
     /// <summary>Currently active chunk instances in the world.</summary>
@@ -136,12 +139,10 @@ public partial class TerrainManager : Node2D
 
     // ── Private helpers ──────────────────────────────────────────
 
-    /// <summary>Get the player's current X position (stub).</summary>
+    /// <summary>Get the player's current X position.</summary>
     private float GetPlayerX()
     {
-        // TODO: Replace with actual player reference
-        // For now, return 0. The real implementation will track the player node.
-        return 0f;
+        return PlayerNode?.GlobalPosition.X ?? 0f;
     }
 
     /// <summary>Check if the player has entered a new chunk and emit signals.</summary>

@@ -1,54 +1,175 @@
 using Godot;
+using PeakShift.Core;
+using PeakShift.UI;
 
 namespace PeakShift;
 
 /// <summary>
 /// Singleton node that manages the overall game state machine.
 /// States: Menu, Playing, Paused, GameOver.
+/// Wires signals between all game systems on _Ready.
 /// </summary>
 public partial class GameManager : Node
 {
     /// <summary>Possible game states.</summary>
     public enum GameState
     {
-        /// <summary>Main menu / title screen.</summary>
         Menu,
-
-        /// <summary>Active gameplay.</summary>
         Playing,
-
-        /// <summary>Game is paused.</summary>
         Paused,
-
-        /// <summary>Run has ended.</summary>
         GameOver
     }
 
     // ── Signals ──────────────────────────────────────────────────
 
-    /// <summary>Emitted when a new game run starts.</summary>
     [Signal]
     public delegate void GameStartedEventHandler();
 
-    /// <summary>Emitted when the game ends.</summary>
     [Signal]
     public delegate void GameOverEventHandler();
 
-    /// <summary>Emitted when the game state changes.</summary>
     [Signal]
     public delegate void StateChangedEventHandler(int newState);
 
     // ── Properties ───────────────────────────────────────────────
 
-    /// <summary>The current state of the game.</summary>
     public GameState CurrentState { get; private set; } = GameState.Menu;
+
+    // ── Cached references ────────────────────────────────────────
+
+    private RunManager _runManager;
+    private PlayerController _player;
+    private TerrainManager _terrainManager;
+    private BiomeManager _biomeManager;
+    private AudioManager _audioManager;
+    private HUDController _hud;
+    private MainMenuController _mainMenu;
+    private GameOverController _gameOver;
+    private PauseMenuController _pauseMenu;
 
     // ── Lifecycle ────────────────────────────────────────────────
 
     public override void _Ready()
     {
         CurrentState = GameState.Menu;
+
+        // Resolve sibling nodes
+        _runManager = GetNodeOrNull<RunManager>("../RunManager");
+        _player = GetNodeOrNull<PlayerController>("../Player");
+        _terrainManager = GetNodeOrNull<TerrainManager>("../TerrainManager");
+        _biomeManager = GetNodeOrNull<BiomeManager>("../BiomeManager");
+        _audioManager = GetNodeOrNull<AudioManager>("../AudioManager");
+        _hud = GetNodeOrNull<HUDController>("../HUD");
+        _mainMenu = GetNodeOrNull<MainMenuController>("../MainMenu");
+        _gameOver = GetNodeOrNull<GameOverController>("../GameOver");
+        _pauseMenu = GetNodeOrNull<PauseMenuController>("../PauseMenu");
+
+        // Give TerrainManager a reference to the player
+        if (_terrainManager != null && _player != null)
+        {
+            _terrainManager.PlayerNode = _player;
+        }
+
+        ConnectSignals();
+
         GD.Print("[GameManager] Initialized — state: Menu");
+    }
+
+    private void ConnectSignals()
+    {
+        // MainMenu → GameManager
+        if (_mainMenu != null)
+        {
+            _mainMenu.PlayPressed += StartGame;
+        }
+
+        // GameOver → GameManager
+        if (_gameOver != null)
+        {
+            _gameOver.RetryPressed += StartGame;
+            _gameOver.MenuPressed += ReturnToMenu;
+        }
+
+        // PauseMenu → GameManager
+        if (_pauseMenu != null)
+        {
+            _pauseMenu.ResumePressed += ResumeGame;
+            _pauseMenu.QuitPressed += ReturnToMenu;
+        }
+
+        // PlayerController → HUD (vehicle swap)
+        if (_player != null && _hud != null)
+        {
+            _player.VehicleSwapped += (int newState) =>
+            {
+                bool isBike = newState == (int)PlayerController.PlayerState.Biking;
+                _hud.UpdateVehicleIcon(isBike);
+            };
+        }
+
+        // PlayerController crash → GameManager end game
+        if (_player != null)
+        {
+            _player.PlayerCrashed += EndGame;
+        }
+
+        // RunManager → HUD (score updates)
+        if (_runManager != null && _hud != null)
+        {
+            _runManager.ScoreUpdated += (int newScore) =>
+            {
+                _hud.UpdateScore(newScore, _runManager.Multiplier);
+            };
+        }
+
+        // TerrainManager → PlayerController (terrain changes)
+        if (_terrainManager != null && _player != null)
+        {
+            _terrainManager.TerrainChanged += (int newTerrainType) =>
+            {
+                _player.CurrentTerrain = (TerrainType)newTerrainType;
+                if (_runManager != null)
+                    _runManager.CurrentTerrain = (TerrainType)newTerrainType;
+            };
+        }
+
+        // GameManager signals → UI visibility
+        GameStarted += OnGameStarted;
+        GameOver += OnGameOver;
+    }
+
+    private void OnGameStarted()
+    {
+        _runManager?.ResetRun();
+        _biomeManager?.Reset();
+
+        if (_mainMenu != null) _mainMenu.Visible = false;
+        if (_gameOver != null) _gameOver.Visible = false;
+        if (_pauseMenu != null) _pauseMenu.Visible = false;
+
+        _audioManager?.PlayMusic();
+    }
+
+    private void OnGameOver()
+    {
+        if (_gameOver != null && _runManager != null)
+        {
+            _gameOver.ShowScore(_runManager.Score);
+        }
+        _audioManager?.StopMusic();
+    }
+
+    private void ReturnToMenu()
+    {
+        CurrentState = GameState.Menu;
+        GetTree().Paused = false;
+        EmitSignal(SignalName.StateChanged, (int)CurrentState);
+
+        if (_mainMenu != null) _mainMenu.Visible = true;
+        if (_gameOver != null) _gameOver.Visible = false;
+        if (_pauseMenu != null) _pauseMenu.Visible = false;
+
+        GD.Print("[GameManager] Returned to menu");
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -69,7 +190,6 @@ public partial class GameManager : Node
 
     // ── Public API ───────────────────────────────────────────────
 
-    /// <summary>Transition from Menu or GameOver to Playing and begin a new run.</summary>
     public void StartGame()
     {
         if (CurrentState is not (GameState.Menu or GameState.GameOver))
@@ -82,7 +202,6 @@ public partial class GameManager : Node
         GD.Print("[GameManager] Game started");
     }
 
-    /// <summary>Pause the active run.</summary>
     public void PauseGame()
     {
         if (CurrentState != GameState.Playing)
@@ -90,11 +209,11 @@ public partial class GameManager : Node
 
         CurrentState = GameState.Paused;
         GetTree().Paused = true;
+        if (_pauseMenu != null) _pauseMenu.Visible = true;
         EmitSignal(SignalName.StateChanged, (int)CurrentState);
         GD.Print("[GameManager] Game paused");
     }
 
-    /// <summary>Resume a paused run.</summary>
     public void ResumeGame()
     {
         if (CurrentState != GameState.Paused)
@@ -102,11 +221,11 @@ public partial class GameManager : Node
 
         CurrentState = GameState.Playing;
         GetTree().Paused = false;
+        if (_pauseMenu != null) _pauseMenu.Visible = false;
         EmitSignal(SignalName.StateChanged, (int)CurrentState);
         GD.Print("[GameManager] Game resumed");
     }
 
-    /// <summary>End the current run and transition to GameOver.</summary>
     public void EndGame()
     {
         if (CurrentState is not (GameState.Playing or GameState.Paused))

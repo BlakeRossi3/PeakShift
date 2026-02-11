@@ -1,10 +1,8 @@
 using Godot;
 using System.Collections.Generic;
+using PeakShift;
 
 namespace PeakShift.Data;
-
-// TODO: Remove after merge with PC1 — TerrainType is defined in Scripts/Core/TerrainType.cs
-public enum TerrainType { Snow, Dirt, Ice, Slush }
 
 [GlobalClass]
 public partial class BiomeData : Resource
