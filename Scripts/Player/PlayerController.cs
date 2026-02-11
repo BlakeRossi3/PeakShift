@@ -8,7 +8,8 @@ namespace PeakShift;
 /// Main player controller. CharacterBody2D driven by momentum-based physics.
 ///
 /// State machine: Grounded → Airborne → Flipping → (landing) → Grounded
-///                Grounded ↔ Tucking (ski only, while grounded)
+///                Grounded ↔ Tucking (both vehicles, grounded downforce)
+///                Airborne ↔ AirborneTucking (aerial dive, anti-lift)
 ///
 /// Core loop each frame:
 ///   1. Update state machine transitions
@@ -27,7 +28,8 @@ public partial class PlayerController : CharacterBody2D
 	{
 		Grounded,
 		Airborne,
-		Tucking,
+		Tucking,          // Grounded tuck: path adherence, downforce
+		AirborneTucking,  // Aerial tuck: dive, anti-lift
 		Flipping
 	}
 
@@ -125,7 +127,8 @@ public partial class PlayerController : CharacterBody2D
 	public float DebugSlopeAngleDeg { get; private set; }
 	public float DebugVerticalVelocity { get; private set; }
 	public float DebugForwardVelocity { get; private set; }
-	public bool DebugIsAirborne => CurrentMoveState == MoveState.Airborne || CurrentMoveState == MoveState.Flipping;
+	public bool DebugIsAirborne => CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking or MoveState.Flipping;
+	public bool DebugIsTucking => CurrentMoveState is MoveState.Tucking or MoveState.AirborneTucking;
 	public string DebugTerrainType => CurrentTerrain.ToString();
 	public bool DebugOverGap { get; private set; }
 
@@ -181,13 +184,19 @@ public partial class PlayerController : CharacterBody2D
 		// ── Flip input (airborne only) ──────────────────────────────
 		if (@event.IsActionPressed("jump"))
 		{
-			if (CurrentMoveState == MoveState.Airborne)
+			if (CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking)
 			{
+				// Exit aerial tuck to flip
+				if (CurrentMoveState == MoveState.AirborneTucking)
+				{
+					_tuckInputHeld = false;
+					if (SkiNode != null) SkiNode.IsTucking = false;
+				}
 				EnterFlipping();
 			}
 		}
 
-		// ── Tuck input (ski only) ───────────────────────────────────
+		// ── Tuck input (both vehicles) ─────────────────────────────
 		if (@event.IsActionPressed("tuck"))
 		{
 			_tuckInputHeld = true;
@@ -239,6 +248,7 @@ public partial class PlayerController : CharacterBody2D
 				break;
 
 			case MoveState.Airborne:
+			case MoveState.AirborneTucking:
 				ProcessAirborne(dt);
 				break;
 
@@ -373,15 +383,25 @@ public partial class PlayerController : CharacterBody2D
 			Velocity = tangent * MomentumSpeed;
 		}
 
+		// ── Tuck downforce (grounded) ──────────────────────────────
+		// When tucking on ground, apply downward velocity component to
+		// counteract small upward bounces from terrain undulations.
+		if (isTucking)
+		{
+			Velocity = new Vector2(Velocity.X,
+				Mathf.Max(Velocity.Y, PhysicsConstants.TuckGroundedDownforce * dt));
+		}
+
 		// ── Centripetal launch check ────────────────────────────────
 		// Before MoveAndSlide, check if the player should detach from the
 		// terrain at a convex crest (like Tiny Wings / Sonic).
+		// Tuck raises the launch threshold — prevents premature lift.
 		if (_terrainManager != null)
 		{
 			float curvature = ComputeCurvatureAtPlayer();
 			float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
 
-			if (MomentumPhysics.ShouldLaunchFromSurface(MomentumSpeed, curvature, gravMult))
+			if (MomentumPhysics.ShouldLaunchFromSurface(MomentumSpeed, curvature, gravMult, isTucking))
 			{
 				// Disable floor snap for this launch
 				FloorSnapLength = 0f;
@@ -397,13 +417,15 @@ public partial class PlayerController : CharacterBody2D
 		// ── Post-move terrain hugging ───────────────────────────────
 		// If MoveAndSlide lost floor contact (small bump, polygon edge),
 		// snap the player back to the terrain surface if they're close.
+		// Tuck increases snap distance for better path adherence.
 		if (!IsOnFloor() && _terrainManager != null)
 		{
 			float terrainY = _terrainManager.GetTerrainHeight(GlobalPosition.X);
 			float targetY = terrainY - _collisionHalfHeight;
 			float distToSurface = Mathf.Abs(Position.Y - targetY);
+			float snapDist = MomentumPhysics.GetEffectiveSnapDistance(isTucking);
 
-			if (distToSurface < PhysicsConstants.GroundSnapDistance)
+			if (distToSurface < snapDist)
 			{
 				// Snap to surface — player flows over the bump
 				Position = new Vector2(Position.X, targetY);
@@ -428,11 +450,19 @@ public partial class PlayerController : CharacterBody2D
 	private void ProcessAirborne(float dt)
 	{
 		float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
+		bool isAerialTuck = CurrentMoveState == MoveState.AirborneTucking;
 
 		// ── Integrate airborne trajectory ───────────────────────────
-		// x(t) = v_x * dt  (with air drag)
-		// y(t) = v_y * dt + 0.5 * g * dt^2
-		_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, gravMult);
+		if (isAerialTuck)
+		{
+			// Aerial tuck: boosted gravity + dive acceleration + upward velocity clamp
+			_airVelocity = MomentumPhysics.IntegrateAirborneTucking(_airVelocity, dt, gravMult);
+		}
+		else
+		{
+			// Normal airborne: standard gravity + light air drag
+			_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, gravMult);
+		}
 
 		Velocity = _airVelocity;
 		MoveAndSlide();
@@ -480,7 +510,9 @@ public partial class PlayerController : CharacterBody2D
 
 	private void TransitionToAirborne()
 	{
-		CurrentMoveState = MoveState.Airborne;
+		// If tuck is held, transition to aerial tuck (dive) instead of normal airborne
+		bool wasTucking = _tuckInputHeld;
+		CurrentMoveState = wasTucking ? MoveState.AirborneTucking : MoveState.Airborne;
 
 		// Use current velocity as air velocity
 		_airVelocity = Velocity;
@@ -494,9 +526,8 @@ public partial class PlayerController : CharacterBody2D
 			_launchNormal = terrainNormal;
 		}
 
-		// Exit tuck on launch
-		if (SkiNode != null) SkiNode.IsTucking = false;
-		_tuckInputHeld = false;
+		// Update visual tuck state
+		if (SkiNode != null) SkiNode.IsTucking = wasTucking;
 
 		// ── Jump clearance check ───────────────────────────────────
 		// When launching over a gap, predict trajectory and fail immediately
@@ -506,7 +537,7 @@ public partial class PlayerController : CharacterBody2D
 
 	private void EnterFlipping()
 	{
-		if (CurrentMoveState != MoveState.Airborne)
+		if (CurrentMoveState is not (MoveState.Airborne or MoveState.AirborneTucking))
 			return;
 
 		CurrentMoveState = MoveState.Flipping;
@@ -524,11 +555,16 @@ public partial class PlayerController : CharacterBody2D
 
 	private void OnLanding()
 	{
-		CurrentMoveState = MoveState.Grounded;
+		// If landing while aerial-tucking and tuck is still held, go straight to grounded tuck
+		bool landIntoTuck = _tuckInputHeld;
+		CurrentMoveState = landIntoTuck ? MoveState.Tucking : MoveState.Grounded;
 
 		// Recover momentum speed from horizontal air velocity
 		MomentumSpeed = Mathf.Abs(_airVelocity.X);
 		_airVelocity = Vector2.Zero;
+
+		// Update visual tuck state
+		if (SkiNode != null) SkiNode.IsTucking = landIntoTuck;
 
 		// Reset sprite rotation
 		if (_playerSprite != null)
@@ -572,19 +608,30 @@ public partial class PlayerController : CharacterBody2D
 
 	private void UpdateTuckState()
 	{
-		// Tuck only available for skis while grounded
-		bool canTuck = CurrentVehicleType == VehicleType.Ski
-					   && (CurrentMoveState == MoveState.Grounded || CurrentMoveState == MoveState.Tucking)
-					   && _tuckInputHeld;
+		// ── Grounded tuck: available for both vehicles ─────────────
+		bool canGroundTuck = (CurrentMoveState == MoveState.Grounded || CurrentMoveState == MoveState.Tucking)
+							 && _tuckInputHeld;
 
-		if (canTuck && CurrentMoveState == MoveState.Grounded)
+		if (canGroundTuck && CurrentMoveState == MoveState.Grounded)
 		{
 			CurrentMoveState = MoveState.Tucking;
 			if (SkiNode != null) SkiNode.IsTucking = true;
 		}
-		else if (!canTuck && CurrentMoveState == MoveState.Tucking)
+		else if (!canGroundTuck && CurrentMoveState == MoveState.Tucking)
 		{
 			CurrentMoveState = MoveState.Grounded;
+			if (SkiNode != null) SkiNode.IsTucking = false;
+		}
+
+		// ── Aerial tuck: press/hold tuck while airborne ────────────
+		if (CurrentMoveState == MoveState.Airborne && _tuckInputHeld)
+		{
+			CurrentMoveState = MoveState.AirborneTucking;
+			if (SkiNode != null) SkiNode.IsTucking = true;
+		}
+		else if (CurrentMoveState == MoveState.AirborneTucking && !_tuckInputHeld)
+		{
+			CurrentMoveState = MoveState.Airborne;
 			if (SkiNode != null) SkiNode.IsTucking = false;
 		}
 	}
@@ -606,11 +653,6 @@ public partial class PlayerController : CharacterBody2D
 		{
 			CurrentVehicleType = VehicleType.Bike;
 			CurrentVehicle = BikeNode;
-			// Exit tuck when switching to bike
-			if (SkiNode != null) SkiNode.IsTucking = false;
-			_tuckInputHeld = false;
-			if (CurrentMoveState == MoveState.Tucking)
-				CurrentMoveState = MoveState.Grounded;
 		}
 
 		CurrentVehicle?.OnActivated();
@@ -740,10 +782,10 @@ public partial class PlayerController : CharacterBody2D
 	/// </summary>
 	private void UpdateDebugState()
 	{
-		DebugForwardVelocity = CurrentMoveState is MoveState.Airborne or MoveState.Flipping
+		DebugForwardVelocity = CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking or MoveState.Flipping
 			? _airVelocity.X
 			: MomentumSpeed;
-		DebugVerticalVelocity = CurrentMoveState is MoveState.Airborne or MoveState.Flipping
+		DebugVerticalVelocity = CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking or MoveState.Flipping
 			? _airVelocity.Y
 			: Velocity.Y;
 		DebugOverGap = _terrainManager?.IsOverGap(GlobalPosition.X) ?? false;
@@ -791,6 +833,7 @@ public partial class PlayerController : CharacterBody2D
 		if (SkiNode != null) SkiNode.IsTucking = false;
 		_tuckInputHeld = false;
 		_brakeInputHeld = false;
+		_airVelocity = Vector2.Zero;
 
 		CurrentMoveState = MoveState.Grounded;
 		EmitSignal(SignalName.PlayerCrashed);

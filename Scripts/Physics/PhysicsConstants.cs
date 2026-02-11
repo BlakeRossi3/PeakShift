@@ -37,7 +37,7 @@ public static class PhysicsConstants
     /// <summary>Starting speed for new runs (px/s).</summary>
     public const float StartingSpeed = 350f;
 
-    // ── Tuck Modifiers ───────────────────────────────────────────────
+    // ── Tuck Modifiers (Grounded) ─────────────────────────────────────
     /// <summary>Drag multiplier when tucking (0.0–1.0, lower = less drag).</summary>
     public const float TuckDragMultiplier = 0.35f;
 
@@ -52,6 +52,54 @@ public static class PhysicsConstants
 
     /// <summary>Terminal velocity multiplier when tucking (allows higher top speed).</summary>
     public const float TuckTerminalVelocityMultiplier = 1.25f;
+
+    // ── Tuck Downforce (Grounded Path Adherence) ────────────────────
+    /// <summary>
+    /// Multiplier applied to the centripetal launch threshold when grounded-tucking.
+    /// Higher = harder to accidentally launch. At 2.5, the player needs 2.5x the
+    /// centripetal force to detach from the surface while tucking.
+    /// This is the core "stay on path" mechanic — tuck prevents premature lift.
+    /// </summary>
+    public const float TuckLaunchThresholdMultiplier = 2.5f;
+
+    /// <summary>
+    /// Extra ground snap distance (px) when tucking. Adds to GroundSnapDistance
+    /// so the player sticks through bigger bumps while tucked.
+    /// </summary>
+    public const float TuckExtraSnapDistance = 40f;
+
+    /// <summary>
+    /// Downward velocity applied each frame while grounded-tucking to counteract
+    /// any upward bounce from terrain undulations (px/s).
+    /// </summary>
+    public const float TuckGroundedDownforce = 600f;
+
+    // ── Tuck Aerial Dive ────────────────────────────────────────────
+    /// <summary>
+    /// Downward acceleration applied while tucking in air (px/s^2).
+    /// Added on top of normal gravity. Makes the player dive toward the slope.
+    /// </summary>
+    public const float TuckAerialDiveAcceleration = 1800f;
+
+    /// <summary>
+    /// Gravity scale multiplier while aerial-tucking. Stacks with vehicle gravity.
+    /// At 1.6, effective gravity is 60% stronger than normal while diving.
+    /// </summary>
+    public const float TuckAerialGravityMultiplier = 1.6f;
+
+    /// <summary>
+    /// Maximum upward (negative Y) velocity allowed while aerial-tucking (px/s).
+    /// Clamps positive vertical velocity to prevent continued rise.
+    /// Set to a small negative value so the player can still arc slightly upward
+    /// but won't gain height. 0 = immediately kills all upward momentum.
+    /// </summary>
+    public const float TuckAerialMaxUpwardVelocity = -50f;
+
+    /// <summary>
+    /// Maximum downward velocity while aerial-tucking (px/s, positive = down).
+    /// Prevents the dive from becoming an uncontrollable plummet.
+    /// </summary>
+    public const float TuckAerialMaxDownwardVelocity = 1600f;
 
     // ── Jump / Airborne ──────────────────────────────────────────────
     /// <summary>Minimum speed required to get any meaningful launch (px/s).</summary>
