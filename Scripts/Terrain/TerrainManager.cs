@@ -279,8 +279,9 @@ public partial class TerrainManager : Node2D
     /// Returns the terrain surface Y at the given world X position.
     /// Uses layered sine waves for dramatic hills with screen-height variation.
     /// Creates larger hills with bigger drops, fewer small bumps.
+    /// Public so PlayerController can query slope geometry.
     /// </summary>
-    private float GetTerrainHeight(float worldX)
+    public float GetTerrainHeight(float worldX)
     {
         // Large hills with screen-height variation (removed small bumps for smoother, bigger hills)
         float variation =
@@ -291,6 +292,31 @@ public partial class TerrainManager : Node2D
         float blend = Mathf.Clamp(worldX / 400f, 0f, 1f);
 
         return BaseGroundY + variation * blend;
+    }
+
+    /// <summary>
+    /// Returns the approximate terrain surface normal at a given world X position.
+    /// Computed by sampling two nearby points and finding the perpendicular.
+    /// Used by PlayerController for launch angle calculations when floor normal
+    /// is unavailable (e.g. at ramp edges).
+    /// </summary>
+    public Vector2 GetTerrainNormalAt(float worldX)
+    {
+        const float sampleDelta = 4f;
+        float yLeft = GetTerrainHeight(worldX - sampleDelta);
+        float yRight = GetTerrainHeight(worldX + sampleDelta);
+
+        // Tangent points right along the surface
+        Vector2 tangent = new Vector2(sampleDelta * 2f, yRight - yLeft).Normalized();
+
+        // Normal is perpendicular to tangent, pointing "up" (negative Y in Godot)
+        Vector2 normal = new Vector2(-tangent.Y, tangent.X);
+
+        // Ensure normal points upward (Y < 0)
+        if (normal.Y > 0f)
+            normal = -normal;
+
+        return normal;
     }
 
     /// <summary>

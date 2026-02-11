@@ -137,7 +137,7 @@ public partial class GameManager : Node
 		{
 			_player.VehicleSwapped += (int newState) =>
 			{
-				bool isBike = newState == (int)PlayerController.PlayerState.Biking;
+				bool isBike = newState == (int)PlayerController.VehicleType.Bike;
 				_hud.UpdateVehicleIcon(isBike);
 			};
 			GD.Print("[GameManager] ✓ Connected PlayerController.VehicleSwapped → HUD");

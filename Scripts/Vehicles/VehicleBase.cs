@@ -3,61 +3,79 @@ using Godot;
 namespace PeakShift;
 
 /// <summary>
-/// Abstract base class for all vehicle types. Provides speed/gravity modifiers
-/// and activation hooks. Extend this for each specific vehicle.
+/// Abstract base class for all vehicle types in the momentum physics system.
+/// Each vehicle defines its own friction, drag, gravity, and terrain affinity
+/// parameters that feed into MomentumPhysics calculations.
 /// </summary>
 public abstract partial class VehicleBase : Node2D
 {
-    /// <summary>Base horizontal speed for this vehicle (pixels/s).</summary>
-    [Export]
-    public float BaseSpeed { get; set; } = 700f;
+    // ── Speed Limits ─────────────────────────────────────────────────
 
-    /// <summary>Maximum horizontal speed for this vehicle (pixels/s).</summary>
+    /// <summary>Maximum horizontal speed for this vehicle (px/s).</summary>
     [Export]
-    public float MaxSpeed { get; set; } = 1000f;
+    public float MaxSpeed { get; set; } = 800f;
 
-    /// <summary>Base gravity value (pixels/s^2).</summary>
-    [Export]
-    public float BaseGravity { get; set; } = 80f;
-
-    // ── Abstract API ─────────────────────────────────────────────
+    // ── Physics Modifiers ────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the acceleration rate (pixels/s^2) for the given terrain type.
-    /// Positive = speed up, negative = slow down.
+    /// Gravity multiplier. Greater than 1 = heavier/faster falling.
+    /// Less than 1 = floatier/more airtime.
     /// </summary>
-    /// <param name="terrain">The current terrain surface.</param>
-    /// <returns>Acceleration rate.</returns>
-    public abstract float GetAcceleration(TerrainType terrain);
+    public abstract float GravityMultiplier { get; }
 
     /// <summary>
-    /// Returns the speed multiplier for the given terrain type.
-    /// Values greater than 1 mean faster; less than 1 mean slower.
+    /// Drag coefficient multiplier for this vehicle.
+    /// Affects aerodynamic drag (v^2 term). Lower = more aerodynamic.
     /// </summary>
-    /// <param name="terrain">The current terrain surface.</param>
-    /// <returns>Speed modifier float.</returns>
-    public abstract float GetSpeedModifier(TerrainType terrain);
+    public abstract float DragModifier { get; }
 
     /// <summary>
-    /// Returns the gravity multiplier for this vehicle.
-    /// Greater than 1 = heavier, less than 1 = floatier.
+    /// Rolling resistance multiplier for this vehicle.
+    /// Affects constant ground friction. Lower = smoother ride.
     /// </summary>
-    /// <returns>Gravity modifier float.</returns>
-    public abstract float GetGravityMultiplier();
+    public abstract float RollingResistanceModifier { get; }
 
-    // ── Virtual hooks ────────────────────────────────────────────
+    /// <summary>
+    /// Flip angular velocity multiplier. Higher = faster rotation.
+    /// Heavier vehicles rotate slower.
+    /// </summary>
+    public abstract float FlipSpeedModifier { get; }
+
+    // ── Terrain Affinity ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a terrain efficiency bonus/penalty (px/s^2).
+    /// Positive = vehicle excels on this terrain (bonus acceleration).
+    /// Negative = vehicle struggles (penalty deceleration).
+    /// This is added directly to the total ground acceleration.
+    /// </summary>
+    public abstract float GetTerrainBonus(TerrainType terrain);
+
+    /// <summary>
+    /// Returns terrain-specific friction modifier for this vehicle.
+    /// Multiplied with the terrain's base friction coefficient.
+    /// Lower values = less friction on that surface.
+    /// </summary>
+    public abstract float GetTerrainFrictionModifier(TerrainType terrain);
+
+    /// <summary>
+    /// Returns terrain-specific drag modifier for this vehicle.
+    /// Multiplied with the terrain's base drag modifier.
+    /// Lower values = less drag on that surface.
+    /// </summary>
+    public abstract float GetTerrainDragModifier(TerrainType terrain);
+
+    // ── Activation Hooks ─────────────────────────────────────────────
 
     /// <summary>Called when this vehicle becomes the active vehicle.</summary>
     public virtual void OnActivated()
     {
         Visible = true;
-        GD.Print($"[{GetType().Name}] Activated");
     }
 
     /// <summary>Called when this vehicle is swapped out.</summary>
     public virtual void OnDeactivated()
     {
         Visible = false;
-        GD.Print($"[{GetType().Name}] Deactivated");
     }
 }

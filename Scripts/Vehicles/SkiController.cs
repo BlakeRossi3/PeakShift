@@ -4,65 +4,84 @@ namespace PeakShift;
 
 /// <summary>
 /// Ski vehicle. Excels on snow and ice, struggles on dirt.
-/// Light and floaty (low gravity multiplier).
-/// Higher max speed than bike.
+/// Light and aerodynamic (low gravity multiplier, low drag).
+/// Higher max speed than bike. Can tuck for drag reduction.
 /// </summary>
 public partial class SkiController : VehicleBase
 {
     /// <summary>
-    /// When true, the skier is tucking — reduces drag and increases speed by 1.2x.
-    /// Toggled by player input (swipe down / hold down).
+    /// When true, the skier is tucking — reduces drag, increases terminal velocity,
+    /// reduces steering authority. Toggled by player input.
     /// </summary>
     public bool IsTucking { get; set; }
 
-    /// <summary>
-    /// Aerial steering factor (0 = no air control, 1 = full).
-    /// Stub for future aerial mechanics.
-    /// </summary>
-    [Export]
-    public float AirControlFactor { get; set; } = 0.5f;
-
     public SkiController()
     {
-        MaxSpeed = 650f;  // Higher max speed for skis
+        MaxSpeed = 950f;
     }
 
-    /// <inheritdoc/>
-    public override float GetAcceleration(TerrainType terrain)
+    // ── Physics Properties ───────────────────────────────────────────
+
+    /// <summary>Light — more airtime, floatier jumps.</summary>
+    public override float GravityMultiplier => 0.85f;
+
+    /// <summary>Aerodynamic profile — less drag than bike.</summary>
+    public override float DragModifier => 0.75f;
+
+    /// <summary>Low rolling resistance — skis glide.</summary>
+    public override float RollingResistanceModifier => 0.6f;
+
+    /// <summary>Lighter vehicle rotates faster in flips.</summary>
+    public override float FlipSpeedModifier => 1.2f;
+
+    // ── Terrain Affinity ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Ski terrain bonuses:
+    ///   Snow: +100 px/s^2 (excels — designed for snow)
+    ///   Dirt: -100 px/s^2 (struggles — skis catch on dirt)
+    ///   Ice:  +60 px/s^2 (good — low friction surface matches skis)
+    /// </summary>
+    public override float GetTerrainBonus(TerrainType terrain) => terrain switch
     {
-        return terrain switch
-        {
-            TerrainType.Snow  => 200f,   // Fast acceleration on snow
-            TerrainType.Dirt  => -180f,  // Strong deceleration on dirt
-            TerrainType.Ice   => 120f,   // Good acceleration on ice
-            _                 => 0f
-        };
-    }
+        TerrainType.Snow => 100f,
+        TerrainType.Dirt => -100f,
+        TerrainType.Ice => 60f,
+        _ => 0f
+    };
 
-    /// <inheritdoc/>
-    public override float GetSpeedModifier(TerrainType terrain)
+    /// <summary>
+    /// Ski friction modifiers:
+    ///   Snow: 0.6 (smooth glide)
+    ///   Dirt: 1.5 (high friction — skis scrape)
+    ///   Ice:  0.4 (very low friction)
+    /// </summary>
+    public override float GetTerrainFrictionModifier(TerrainType terrain) => terrain switch
     {
-        return terrain switch
-        {
-            TerrainType.Snow  => 1.5f,
-            TerrainType.Dirt  => 0.6f,
-            TerrainType.Ice   => 1.2f,
-            _                 => 1.0f
-        };
-    }
+        TerrainType.Snow => 0.6f,
+        TerrainType.Dirt => 1.5f,
+        TerrainType.Ice => 0.4f,
+        _ => 1.0f
+    };
 
-    /// <inheritdoc/>
-    public override float GetGravityMultiplier()
+    /// <summary>
+    /// Ski drag modifiers per terrain:
+    ///   Snow: 0.8 (reduced — at home)
+    ///   Dirt: 1.3 (debris increases drag)
+    ///   Ice:  0.7 (very clean surface)
+    /// </summary>
+    public override float GetTerrainDragModifier(TerrainType terrain) => terrain switch
     {
-        return 0.7f; // Floaty
-    }
+        TerrainType.Snow => 0.8f,
+        TerrainType.Dirt => 1.3f,
+        TerrainType.Ice => 0.7f,
+        _ => 1.0f
+    };
 
-    /// <inheritdoc/>
     public override void OnActivated()
     {
         base.OnActivated();
         IsTucking = false;
-        // TODO: Show ski sprite / animation
-        GD.Print("[SkiController] Ski sprite shown");
+        GD.Print("[SkiController] Activated");
     }
 }

@@ -1,409 +1,584 @@
 using Godot;
+using PeakShift.Physics;
 
 namespace PeakShift;
 
 /// <summary>
-/// Main player controller. CharacterBody2D with a state machine that handles
-/// auto-forward movement, vehicle switching (bike/ski), input, and collisions.
-/// Only processes movement and input when the game is in the Playing state.
+/// Main player controller. CharacterBody2D driven by momentum-based physics.
+///
+/// State machine: Grounded → Airborne → Flipping → (landing) → Grounded
+///                Grounded ↔ Tucking (ski only, while grounded)
+///
+/// Core loop each frame:
+///   1. Update state machine transitions
+///   2. Compute physics (slope accel, drag, gravity, air physics)
+///   3. Apply velocity via MoveAndSlide
+///   4. Check failure conditions
+///
+/// All physics math is delegated to MomentumPhysics (pure, stateless, deterministic).
+/// All tunable constants live in PhysicsConstants.
 /// </summary>
 public partial class PlayerController : CharacterBody2D
 {
-	public enum PlayerState
-	{
-		Biking,
-		Skiing
-	}
+    // ── Movement State Machine ──────────────────────────────────────
 
-	// ── Signals ──────────────────────────────────────────────────
+    public enum MoveState
+    {
+        Grounded,
+        Airborne,
+        Tucking,
+        Flipping
+    }
 
-	[Signal]
-	public delegate void VehicleSwappedEventHandler(int newState);
+    public enum VehicleType
+    {
+        Bike,
+        Ski
+    }
 
-	[Signal]
-	public delegate void PerfectSwapEventHandler();
+    // ── Signals ──────────────────────────────────────────────────────
 
-	[Signal]
-	public delegate void PlayerCrashedEventHandler();
+    [Signal]
+    public delegate void VehicleSwappedEventHandler(int newState);
 
-	// ── Exports ──────────────────────────────────────────────────
+    [Signal]
+    public delegate void PerfectSwapEventHandler();
 
-	[Export]
-	public float BaseSpeed { get; set; } = 300f;
+    [Signal]
+    public delegate void PlayerCrashedEventHandler();
 
-	[Export]
-	public float Gravity { get; set; } = 1600f;
+    [Signal]
+    public delegate void FlipCompletedEventHandler();
 
-	[Export]
-	public float JumpForce { get; set; } = -580f;
+    [Signal]
+    public delegate void FlipFailedEventHandler();
 
-	[Export]
-	public float SwapCooldown { get; set; } = 1.0f;
+    [Signal]
+    public delegate void SpeedChangedEventHandler(float speed);
 
-	[Export]
-	public float FallMultiplier { get; set; } = 2.0f;
+    // ── Node References ─────────────────────────────────────────────
 
-	[Export]
-	public float LowJumpMultiplier { get; set; } = 3.0f;
+    [Export]
+    public BikeController BikeNode { get; set; }
 
-	[Export]
-	public float CoyoteTime { get; set; } = 0.08f;
+    [Export]
+    public SkiController SkiNode { get; set; }
 
-	[Export]
-	public float JumpBufferTime { get; set; } = 0.1f;
+    public VehicleBase CurrentVehicle { get; private set; }
 
-	[Export]
-	public float FallDeathThreshold { get; set; } = 1200f;
+    // ── Public State ────────────────────────────────────────────────
 
-	[Export]
-	public float BikeWallClimbForce { get; set; } = 400f;
+    public MoveState CurrentMoveState { get; private set; } = MoveState.Grounded;
+    public VehicleType CurrentVehicleType { get; private set; } = VehicleType.Bike;
+    public TerrainType CurrentTerrain;
 
-	[Export]
-	public float SkiSlopeAssist { get; set; } = 50f;
+    /// <summary>Current scalar momentum speed along the ground/travel direction (px/s).</summary>
+    public float MomentumSpeed { get; private set; }
 
-	[Export]
-	public float FlipJumpForce { get; set; } = -400f;
+    // ── Private State ───────────────────────────────────────────────
 
-	[Export]
-	public float FlipDuration { get; set; } = 0.5f;
-
-	// ── Node references ──────────────────────────────────────────
-
-	public VehicleBase CurrentVehicle { get; private set; }
-
-	[Export]
-	public BikeController BikeNode { get; set; }
-
-	[Export]
-	public SkiController SkiNode { get; set; }
-
-	// ── State ────────────────────────────────────────────────────
-
-	public PlayerState CurrentState { get; private set; } = PlayerState.Biking;
-	public TerrainType CurrentTerrain;
-
-	private float _swapTimer;
-	private bool _canSwap = true;
-	private GameManager _gameManager;
-
-	private float _coyoteTimer;
-	private float _jumpBufferTimer;
-	private bool _isJumping;
-	private bool _jumpHeld;
-	private bool _wasOnFloor;
-
-	/// <summary>Current horizontal speed (pixels/s).</summary>
-	private float _currentSpeed;
-
-	/// <summary>Starting position, used to reset on new game.</summary>
-	private Vector2 _startPosition;
-
-	// Flip jump state
-	private bool _canFlipJump;
-	private bool _isFlipping;
-	private float _flipTimer;
-	private Sprite2D _playerSprite;
-
-	// ── Lifecycle ────────────────────────────────────────────────
-
-	public override void _Ready()
-	{
-		// Resolve vehicle nodes by path if not assigned via Export
-		BikeNode ??= GetNodeOrNull<BikeController>("Bike");
-		SkiNode ??= GetNodeOrNull<SkiController>("Skis");
-
-		CurrentState = PlayerState.Biking;
-		CurrentVehicle = BikeNode;
-		CurrentVehicle?.OnActivated();
-
-		// Cache the starting position for resets
-		_startPosition = Position;
-		_currentSpeed = BaseSpeed;
-
-		// Find the GameManager sibling
-		_gameManager = GetNodeOrNull<GameManager>("../GameManager");
-
-		// Find sprite for flip rotation
-		_playerSprite = GetNodeOrNull<Sprite2D>("Sprite2D");
-
-		GD.Print("[PlayerController] Ready — state: Biking");
-	}
-
-	public override void _UnhandledInput(InputEvent @event)
-	{
-		// Only accept gameplay input when the game is playing
-		if (_gameManager == null || _gameManager.CurrentState != GameManager.GameState.Playing)
-			return;
-
-		// Jump press — only allow flip while airborne; no standard ground jump
-		if (@event.IsActionPressed("jump"))
-		{
-			if (!IsOnFloor() && _coyoteTimer <= 0 && _canFlipJump && !_isFlipping)
-			{
-				ExecuteFlipJump();
-			}
-		}
-
-		// Tuck (ski only, Down arrow)
-		if (@event.IsActionPressed("tuck"))
-		{
-			if (CurrentState == PlayerState.Skiing && SkiNode != null)
-				SkiNode.IsTucking = true;
-		}
-
-		if (@event.IsActionReleased("tuck"))
-		{
-			if (CurrentState == PlayerState.Skiing && SkiNode != null)
-				SkiNode.IsTucking = false;
-		}
-
-		// Swap vehicle (Left Shift)
-		if (@event.IsActionPressed("swap_vehicle") && _canSwap)
-		{
-			SwapVehicle();
-		}
-	}
-
-	public override void _PhysicsProcess(double delta)
-	{
-		// Only process movement when the game is playing
-		if (_gameManager == null || _gameManager.CurrentState != GameManager.GameState.Playing)
-		{
-			Velocity = Vector2.Zero;
-			return;
-		}
-
-		float dt = (float)delta;
-
-		// Swap cooldown timer
-		if (!_canSwap)
-		{
-			_swapTimer -= dt;
-			if (_swapTimer <= 0f)
-				_canSwap = true;
-		}
-
-		var velocity = Velocity;
-
-		// ── Coyote time ──────────────────────────────────────────
-		if (IsOnFloor())
-		{
-			_coyoteTimer = CoyoteTime;
-			_isJumping = false;
-		}
-		else
-		{
-			_coyoteTimer -= dt;
-		}
-
-		// Note: standard ground jump removed — jumps now come from terrain/ramp momentum.
-
-		// ── Gravity with jump-feel multipliers ───────────────────
-		float vehicleGravMult = CurrentVehicle?.GetGravityMultiplier() ?? 1.0f;
-		if (!IsOnFloor())
-		{
-			float jumpGravMult = 1.0f;
-
-			if (velocity.Y > 0f)
-				jumpGravMult = FallMultiplier;           // Falling — snappy
-
-			velocity.Y += Gravity * vehicleGravMult * jumpGravMult * dt;
-		}
-
-		// ── Flip rotation ────────────────────────────────────────
-		if (_isFlipping)
-		{
-			_flipTimer -= dt;
-			if (_flipTimer <= 0f)
-			{
-				_isFlipping = false;
-				if (_playerSprite != null) _playerSprite.Rotation = 0f;
-			}
-			else if (_playerSprite != null)
-			{
-				// Full 360 rotation over FlipDuration
-				_playerSprite.Rotation += (Mathf.Tau / FlipDuration) * dt;
-			}
-		}
-
-		// Reset flip state on landing
-		if (IsOnFloor() && _isFlipping)
-		{
-			_isFlipping = false;
-			_canFlipJump = false;
-			if (_playerSprite != null) _playerSprite.Rotation = 0f;
-		}
-
-		// ── Auto-forward movement with acceleration ──────────────
-
-		// Get acceleration from current vehicle and terrain
-		float acceleration = CurrentVehicle?.GetAcceleration(CurrentTerrain) ?? 0f;
-
-		// Ice mechanic: can only speed up or maintain speed, never slow down
-		if (CurrentTerrain == TerrainType.Ice && acceleration < 0f)
-		{
-			acceleration = 0f;  // Prevent deceleration on ice
-		}
-
-		// Apply acceleration to current speed
-		_currentSpeed += acceleration * dt;
-
-		// Clamp to vehicle's max speed
-		float maxSpeed = CurrentVehicle?.MaxSpeed ?? 500f;
-
-		// Apply tuck bonus to max speed if skiing
-		if (CurrentState == PlayerState.Skiing && SkiNode is { IsTucking: true })
-			maxSpeed *= 1.2f;
-
-		_currentSpeed = Mathf.Clamp(_currentSpeed, BaseSpeed * 0.5f, maxSpeed);
-
-		velocity.X = _currentSpeed;
-
-		// ── Slope climbing assistance ────────────────────────────
-		// Bikes can climb walls, skis struggle on steep slopes
-		if (IsOnFloor())
-		{
-			Vector2 floorNormal = GetFloorNormal();
-			float slopeAngle = Mathf.RadToDeg(Mathf.Acos(floorNormal.Dot(Vector2.Up)));
-
-			// If on an upward slope (moving right and slope goes up)
-			if (slopeAngle > 5f && floorNormal.X < 0f)  // Upward slope to the right
-			{
-				float slopeAssist = 0f;
-
-				if (CurrentState == PlayerState.Biking)
-				{
-					// Bikes get strong upward force - can climb near-vertical walls
-					slopeAssist = BikeWallClimbForce * (slopeAngle / 90f);
-				}
-				else
-				{
-					// Skis get minimal assist - struggle on steep slopes
-					slopeAssist = SkiSlopeAssist * (slopeAngle / 90f);
-				}
-
-				velocity.Y -= slopeAssist * dt;
-			}
-		}
-
-		Velocity = velocity;
-
-		MoveAndSlide();
-
-		// Detect leaving the ground this frame (launched from terrain) to enable flip
-		if (_wasOnFloor && !IsOnFloor())
-		{
-			_isJumping = true;
-			_canFlipJump = true;
-		}
-
-		_wasOnFloor = IsOnFloor();
-
-		// Fall detection - player fell into a gap
-		if (Position.Y > FallDeathThreshold)
-		{
-			OnCrash();
-			return;
-		}
-
-		// Collision detection for hazards
-		for (int i = 0; i < GetSlideCollisionCount(); i++)
-		{
-			var collision = GetSlideCollision(i);
-			if (collision.GetCollider() is Node2D collider && collider.IsInGroup("hazard"))
-			{
-				OnCrash();
-				break;
-			}
-		}
-	}
-
-	// ── Public API ───────────────────────────────────────────────
-
-	public void SwapVehicle()
-	{
-		if (!_canSwap)
-			return;
-
-		CurrentVehicle?.OnDeactivated();
-
-		if (CurrentState == PlayerState.Biking)
-		{
-			CurrentState = PlayerState.Skiing;
-			CurrentVehicle = SkiNode;
-		}
-		else
-		{
-			CurrentState = PlayerState.Biking;
-			CurrentVehicle = BikeNode;
-		}
-
-		CurrentVehicle?.OnActivated();
-
-		_canSwap = false;
-		_swapTimer = SwapCooldown;
-
-		EmitSignal(SignalName.VehicleSwapped, (int)CurrentState);
-		GD.Print($"[PlayerController] Swapped to {CurrentState}");
-
-		bool isPerfect =
-			(CurrentState == PlayerState.Skiing && CurrentTerrain == TerrainType.Snow) ||
-			(CurrentState == PlayerState.Biking && CurrentTerrain == TerrainType.Dirt);
-
-		if (isPerfect)
-		{
-			EmitSignal(SignalName.PerfectSwap);
-			GD.Print("[PlayerController] Perfect swap!");
-		}
-	}
-
-	/// <summary>Reset position and state for a new run.</summary>
-	public void ResetForNewRun()
-	{
-		Position = _startPosition;
-		Velocity = Vector2.Zero;
-		CurrentState = PlayerState.Biking;
-		_currentSpeed = BaseSpeed;
-
-		// Reset vehicle visuals
-		CurrentVehicle?.OnDeactivated();
-		CurrentVehicle = BikeNode;
-		CurrentVehicle?.OnActivated();
-
-		_canSwap = true;
-		_swapTimer = 0f;
-		_coyoteTimer = 0f;
-		_jumpBufferTimer = 0f;
-		_isJumping = false;
-		_jumpHeld = false;
-		_canFlipJump = false;
-		_isFlipping = false;
-		_flipTimer = 0f;
-		if (_playerSprite != null) _playerSprite.Rotation = 0f;
-		CurrentTerrain = TerrainType.Snow;
-
-		GD.Print("[PlayerController] Reset for new run");
-	}
-
-	// ── Private helpers ──────────────────────────────────────────
-
-	private void ExecuteFlipJump()
-	{
-		// Speed-scaled flip jump — smaller than normal jump but still rewards speed
-		float speedBonus = Mathf.Sqrt(_currentSpeed / BaseSpeed);
-		Velocity = new Vector2(Velocity.X, FlipJumpForce * speedBonus);
-		_canFlipJump = false;
-		_isFlipping = true;
-		_flipTimer = FlipDuration;
-		GD.Print("[PlayerController] Flip jump!");
-	}
-
-	private void OnCrash()
-	{
-		_isFlipping = false;
-		_canFlipJump = false;
-		if (_playerSprite != null) _playerSprite.Rotation = 0f;
-		EmitSignal(SignalName.PlayerCrashed);
-		GD.Print("[PlayerController] Crashed!");
-	}
+    private GameManager _gameManager;
+    private TerrainManager _terrainManager;
+    private Sprite2D _playerSprite;
+    private Vector2 _startPosition;
+
+    // Vehicle swap
+    private float _swapTimer;
+    private bool _canSwap = true;
+
+    // Coyote time (brief window after leaving ground where we don't immediately transition)
+    private float _coyoteTimer;
+    private bool _wasOnFloor;
+
+    // Airborne state
+    private Vector2 _airVelocity;
+    private Vector2 _launchNormal;
+
+    // Flip state
+    private float _flipRotation;
+    private float _flipAngularVelocity;
+    private bool _flipCompleted;
+
+    // Post-flip bonus window
+    private float _flipBonusTimer;
+
+    // Tuck state
+    private bool _tuckInputHeld;
+
+    // ── Lifecycle ───────────────────────────────────────────────────
+
+    public override void _Ready()
+    {
+        BikeNode ??= GetNodeOrNull<BikeController>("Bike");
+        SkiNode ??= GetNodeOrNull<SkiController>("Skis");
+
+        CurrentVehicleType = VehicleType.Bike;
+        CurrentVehicle = BikeNode;
+        CurrentVehicle?.OnActivated();
+
+        _startPosition = Position;
+        MomentumSpeed = PhysicsConstants.StartingSpeed;
+
+        _gameManager = GetNodeOrNull<GameManager>("../GameManager");
+        _terrainManager = GetNodeOrNull<TerrainManager>("../TerrainManager");
+        _playerSprite = GetNodeOrNull<Sprite2D>("Sprite2D");
+
+        GD.Print("[PlayerController] Ready — momentum physics active");
+    }
+
+    // ── Input ───────────────────────────────────────────────────────
+
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (_gameManager == null || _gameManager.CurrentState != GameManager.GameState.Playing)
+            return;
+
+        // ── Flip input (airborne only) ──────────────────────────────
+        if (@event.IsActionPressed("jump"))
+        {
+            if (CurrentMoveState == MoveState.Airborne)
+            {
+                EnterFlipping();
+            }
+        }
+
+        // ── Tuck input (ski only) ───────────────────────────────────
+        if (@event.IsActionPressed("tuck"))
+        {
+            _tuckInputHeld = true;
+        }
+        if (@event.IsActionReleased("tuck"))
+        {
+            _tuckInputHeld = false;
+        }
+
+        // ── Vehicle swap ────────────────────────────────────────────
+        if (@event.IsActionPressed("swap_vehicle") && _canSwap)
+        {
+            SwapVehicle();
+        }
+    }
+
+    // ── Physics Process ─────────────────────────────────────────────
+
+    public override void _PhysicsProcess(double delta)
+    {
+        if (_gameManager == null || _gameManager.CurrentState != GameManager.GameState.Playing)
+        {
+            Velocity = Vector2.Zero;
+            return;
+        }
+
+        float dt = (float)delta;
+
+        UpdateSwapCooldown(dt);
+        UpdateFlipBonusTimer(dt);
+        UpdateTuckState();
+
+        // ── State machine dispatch ──────────────────────────────────
+        switch (CurrentMoveState)
+        {
+            case MoveState.Grounded:
+            case MoveState.Tucking:
+                ProcessGrounded(dt);
+                break;
+
+            case MoveState.Airborne:
+                ProcessAirborne(dt);
+                break;
+
+            case MoveState.Flipping:
+                ProcessFlipping(dt);
+                break;
+        }
+
+        // ── Post-move checks ────────────────────────────────────────
+
+        // Fall death
+        if (Position.Y > PhysicsConstants.FallDeathY)
+        {
+            OnCrash("Fell into gap");
+            return;
+        }
+
+        // Hazard collision
+        for (int i = 0; i < GetSlideCollisionCount(); i++)
+        {
+            var collision = GetSlideCollision(i);
+            if (collision.GetCollider() is Node2D collider && collider.IsInGroup("hazard"))
+            {
+                OnCrash("Hazard collision");
+                return;
+            }
+        }
+
+        _wasOnFloor = IsOnFloor();
+    }
+
+    // ── Grounded Physics ────────────────────────────────────────────
+
+    private void ProcessGrounded(float dt)
+    {
+        bool isTucking = CurrentMoveState == MoveState.Tucking;
+
+        if (IsOnFloor())
+        {
+            _coyoteTimer = PhysicsConstants.CoyoteTime;
+
+            // ── Compute slope angle from floor normal ───────────────
+            Vector2 floorNormal = GetFloorNormal();
+            float slopeAngleRad = MomentumPhysics.ComputeSignedSlopeAngle(floorNormal);
+
+            // ── Gather modifiers ────────────────────────────────────
+            float terrainFriction = MomentumPhysics.GetTerrainFriction(CurrentTerrain);
+            float terrainDragMod = MomentumPhysics.GetTerrainDragModifier(CurrentTerrain);
+
+            float vehicleDragMod = CurrentVehicle?.DragModifier ?? 1.0f;
+            float vehicleFrictionMod = CurrentVehicle?.GetTerrainFrictionModifier(CurrentTerrain) ?? 1.0f;
+            float vehicleDragTerrainMod = CurrentVehicle?.GetTerrainDragModifier(CurrentTerrain) ?? 1.0f;
+            float vehicleTerrainBonus = CurrentVehicle?.GetTerrainBonus(CurrentTerrain) ?? 0f;
+
+            // ── Compute effective coefficients ──────────────────────
+            float effectiveDrag = MomentumPhysics.GetEffectiveDragCoefficient(
+                isTucking, terrainDragMod * vehicleDragTerrainMod, vehicleDragMod);
+
+            float effectiveRollingResistance = MomentumPhysics.GetEffectiveRollingResistance(
+                isTucking, terrainFriction, vehicleFrictionMod);
+
+            // Apply post-flip bonus drag reduction
+            if (_flipBonusTimer > 0f)
+                effectiveDrag *= PhysicsConstants.FlipSuccessDragMultiplier;
+
+            // ── Tuck downhill acceleration bonus ────────────────────
+            float tuckAccelBonus = 1.0f;
+            if (isTucking && slopeAngleRad > 0f)
+                tuckAccelBonus = PhysicsConstants.TuckDownhillAccelBonus;
+
+            // ── Compute total ground acceleration ───────────────────
+            float acceleration = MomentumPhysics.ComputeGroundAcceleration(
+                MomentumSpeed,
+                slopeAngleRad * tuckAccelBonus,
+                effectiveDrag,
+                effectiveRollingResistance,
+                1.0f, // friction already baked into effectiveRollingResistance
+                vehicleTerrainBonus);
+
+            // ── Terminal velocity ───────────────────────────────────
+            float maxSpeed = CurrentVehicle?.MaxSpeed ?? PhysicsConstants.TerminalVelocity;
+            float terminalVel = MomentumPhysics.GetEffectiveTerminalVelocity(isTucking, maxSpeed);
+
+            // ── Integrate speed ─────────────────────────────────────
+            MomentumSpeed = MomentumPhysics.IntegrateSpeed(MomentumSpeed, acceleration, dt, terminalVel);
+
+            // ── Uphill stall check ──────────────────────────────────
+            float slopeAngleDeg = Mathf.RadToDeg(slopeAngleRad);
+            if (slopeAngleDeg < -PhysicsConstants.UphillStallAngle && MomentumSpeed <= PhysicsConstants.StallSpeed)
+            {
+                OnCrash("Stalled uphill");
+                return;
+            }
+
+            // ── Build velocity vector along surface ─────────────────
+            // Tangent direction: perpendicular to floor normal, pointing right
+            Vector2 tangent = new Vector2(floorNormal.Y, -floorNormal.X);
+            if (tangent.X < 0f) tangent = -tangent;
+
+            Velocity = tangent * MomentumSpeed;
+        }
+        else
+        {
+            // Just left the ground — coyote time countdown
+            _coyoteTimer -= dt;
+            if (_coyoteTimer <= 0f)
+            {
+                // Transition to airborne
+                TransitionToAirborne();
+                ProcessAirborne(dt);
+                return;
+            }
+
+            // During coyote time, keep applying last ground velocity
+            Velocity = new Vector2(MomentumSpeed, Velocity.Y);
+        }
+
+        MoveAndSlide();
+
+        // Check if we left the ground this frame
+        if (_wasOnFloor && !IsOnFloor())
+        {
+            // Don't transition yet — coyote time will handle it
+        }
+    }
+
+    // ── Airborne Physics ────────────────────────────────────────────
+
+    private void ProcessAirborne(float dt)
+    {
+        float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
+
+        // ── Integrate airborne trajectory ───────────────────────────
+        // x(t) = v_x * dt  (with air drag)
+        // y(t) = v_y * dt + 0.5 * g * dt^2
+        _airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, gravMult);
+
+        Velocity = _airVelocity;
+        MoveAndSlide();
+
+        // ── Landing detection ───────────────────────────────────────
+        if (IsOnFloor())
+        {
+            OnLanding();
+        }
+    }
+
+    // ── Flipping Physics ────────────────────────────────────────────
+
+    private void ProcessFlipping(float dt)
+    {
+        float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
+
+        // ── Airborne trajectory continues during flip ───────────────
+        _airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, gravMult);
+        Velocity = _airVelocity;
+
+        // ── Integrate rotation ──────────────────────────────────────
+        _flipRotation = MomentumPhysics.IntegrateFlipRotation(_flipRotation, _flipAngularVelocity, dt);
+
+        // Apply visual rotation
+        if (_playerSprite != null)
+            _playerSprite.Rotation = _flipRotation;
+
+        // Check if flip completed full rotation
+        if (!_flipCompleted && MomentumPhysics.IsFlipComplete(_flipRotation))
+        {
+            _flipCompleted = true;
+        }
+
+        MoveAndSlide();
+
+        // ── Landing detection ───────────────────────────────────────
+        if (IsOnFloor())
+        {
+            OnFlipLanding();
+        }
+    }
+
+    // ── State Transitions ───────────────────────────────────────────
+
+    private void TransitionToAirborne()
+    {
+        CurrentMoveState = MoveState.Airborne;
+
+        // Use current velocity as air velocity
+        _airVelocity = Velocity;
+
+        // If velocity is mostly horizontal (launched from ramp), use terrain normal
+        // to compute proper launch arc
+        if (_airVelocity.Y >= -10f && _terrainManager != null)
+        {
+            Vector2 terrainNormal = _terrainManager.GetTerrainNormalAt(GlobalPosition.X);
+            _airVelocity = MomentumPhysics.ComputeLaunchVelocity(MomentumSpeed, terrainNormal);
+            _launchNormal = terrainNormal;
+        }
+
+        // Exit tuck on launch
+        if (SkiNode != null) SkiNode.IsTucking = false;
+        _tuckInputHeld = false;
+    }
+
+    private void EnterFlipping()
+    {
+        if (CurrentMoveState != MoveState.Airborne)
+            return;
+
+        CurrentMoveState = MoveState.Flipping;
+        _flipRotation = 0f;
+        _flipCompleted = false;
+
+        float flipMod = CurrentVehicle?.FlipSpeedModifier ?? 1.0f;
+        _flipAngularVelocity = MomentumPhysics.ComputeFlipAngularVelocity(MomentumSpeed, flipMod);
+
+        GD.Print($"[PlayerController] Flip initiated — angular vel: {_flipAngularVelocity:F1} rad/s");
+    }
+
+    private void OnLanding()
+    {
+        CurrentMoveState = MoveState.Grounded;
+
+        // Recover momentum speed from horizontal air velocity
+        MomentumSpeed = Mathf.Abs(_airVelocity.X);
+        _airVelocity = Vector2.Zero;
+
+        // Reset sprite rotation
+        if (_playerSprite != null)
+            _playerSprite.Rotation = 0f;
+    }
+
+    private void OnFlipLanding()
+    {
+        // Check landing angle
+        bool landingSafe = MomentumPhysics.IsLandingSafe(_flipRotation);
+
+        if (_flipCompleted && landingSafe)
+        {
+            // Successful flip — momentum boost + drag reduction window
+            MomentumSpeed = Mathf.Abs(_airVelocity.X) * PhysicsConstants.FlipSuccessSpeedBoost;
+            _flipBonusTimer = PhysicsConstants.FlipSuccessDragWindowDuration;
+            EmitSignal(SignalName.FlipCompleted);
+            GD.Print($"[PlayerController] Flip success! Speed boosted to {MomentumSpeed:F0}");
+        }
+        else
+        {
+            // Failed flip — crash
+            EmitSignal(SignalName.FlipFailed);
+            OnCrash(_flipCompleted ? "Bad landing angle" : "Incomplete rotation");
+            return;
+        }
+
+        // Reset flip state
+        _flipRotation = 0f;
+        _flipAngularVelocity = 0f;
+        _flipCompleted = false;
+        _airVelocity = Vector2.Zero;
+
+        if (_playerSprite != null)
+            _playerSprite.Rotation = 0f;
+
+        CurrentMoveState = MoveState.Grounded;
+    }
+
+    // ── Tuck Management ─────────────────────────────────────────────
+
+    private void UpdateTuckState()
+    {
+        // Tuck only available for skis while grounded
+        bool canTuck = CurrentVehicleType == VehicleType.Ski
+                       && (CurrentMoveState == MoveState.Grounded || CurrentMoveState == MoveState.Tucking)
+                       && _tuckInputHeld;
+
+        if (canTuck && CurrentMoveState == MoveState.Grounded)
+        {
+            CurrentMoveState = MoveState.Tucking;
+            if (SkiNode != null) SkiNode.IsTucking = true;
+        }
+        else if (!canTuck && CurrentMoveState == MoveState.Tucking)
+        {
+            CurrentMoveState = MoveState.Grounded;
+            if (SkiNode != null) SkiNode.IsTucking = false;
+        }
+    }
+
+    // ── Vehicle Swap ────────────────────────────────────────────────
+
+    public void SwapVehicle()
+    {
+        if (!_canSwap) return;
+
+        CurrentVehicle?.OnDeactivated();
+
+        if (CurrentVehicleType == VehicleType.Bike)
+        {
+            CurrentVehicleType = VehicleType.Ski;
+            CurrentVehicle = SkiNode;
+        }
+        else
+        {
+            CurrentVehicleType = VehicleType.Bike;
+            CurrentVehicle = BikeNode;
+            // Exit tuck when switching to bike
+            if (SkiNode != null) SkiNode.IsTucking = false;
+            _tuckInputHeld = false;
+            if (CurrentMoveState == MoveState.Tucking)
+                CurrentMoveState = MoveState.Grounded;
+        }
+
+        CurrentVehicle?.OnActivated();
+
+        _canSwap = false;
+        _swapTimer = PhysicsConstants.SwapCooldown;
+
+        EmitSignal(SignalName.VehicleSwapped, (int)CurrentVehicleType);
+
+        // Perfect swap detection
+        bool isPerfect =
+            (CurrentVehicleType == VehicleType.Ski && CurrentTerrain == TerrainType.Snow) ||
+            (CurrentVehicleType == VehicleType.Bike && CurrentTerrain == TerrainType.Dirt);
+
+        if (isPerfect)
+        {
+            EmitSignal(SignalName.PerfectSwap);
+            GD.Print("[PlayerController] Perfect swap!");
+        }
+    }
+
+    // ── Reset ───────────────────────────────────────────────────────
+
+    public void ResetForNewRun()
+    {
+        Position = _startPosition;
+        Velocity = Vector2.Zero;
+
+        CurrentVehicleType = VehicleType.Bike;
+        CurrentMoveState = MoveState.Grounded;
+        MomentumSpeed = PhysicsConstants.StartingSpeed;
+
+        CurrentVehicle?.OnDeactivated();
+        CurrentVehicle = BikeNode;
+        CurrentVehicle?.OnActivated();
+
+        _canSwap = true;
+        _swapTimer = 0f;
+        _coyoteTimer = 0f;
+        _wasOnFloor = false;
+
+        _airVelocity = Vector2.Zero;
+        _launchNormal = Vector2.Up;
+
+        _flipRotation = 0f;
+        _flipAngularVelocity = 0f;
+        _flipCompleted = false;
+        _flipBonusTimer = 0f;
+
+        _tuckInputHeld = false;
+        if (SkiNode != null) SkiNode.IsTucking = false;
+
+        if (_playerSprite != null) _playerSprite.Rotation = 0f;
+
+        CurrentTerrain = TerrainType.Snow;
+
+        GD.Print("[PlayerController] Reset for new run");
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────
+
+    private void UpdateSwapCooldown(float dt)
+    {
+        if (!_canSwap)
+        {
+            _swapTimer -= dt;
+            if (_swapTimer <= 0f)
+                _canSwap = true;
+        }
+    }
+
+    private void UpdateFlipBonusTimer(float dt)
+    {
+        if (_flipBonusTimer > 0f)
+            _flipBonusTimer -= dt;
+    }
+
+    private void OnCrash(string reason)
+    {
+        // Reset visual state
+        if (_playerSprite != null) _playerSprite.Rotation = 0f;
+        _flipRotation = 0f;
+        _flipAngularVelocity = 0f;
+        _flipCompleted = false;
+        if (SkiNode != null) SkiNode.IsTucking = false;
+        _tuckInputHeld = false;
+
+        CurrentMoveState = MoveState.Grounded;
+        EmitSignal(SignalName.PlayerCrashed);
+        GD.Print($"[PlayerController] Crashed — {reason}");
+    }
 }

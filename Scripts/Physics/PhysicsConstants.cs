@@ -1,0 +1,112 @@
+namespace PeakShift.Physics;
+
+/// <summary>
+/// All tunable physics constants for the momentum-driven downhill system.
+/// Organized by subsystem. All values are in pixels and seconds unless noted.
+/// </summary>
+public static class PhysicsConstants
+{
+    // ── Gravity ──────────────────────────────────────────────────────
+    /// <summary>Gravitational acceleration (px/s^2). Tuned for 2D at ~60fps.</summary>
+    public const float Gravity = 1800f;
+
+    // ── Drag & Resistance ────────────────────────────────────────────
+    /// <summary>Base aerodynamic drag coefficient. Applied as: drag = coeff * v^2.</summary>
+    public const float BaseDragCoefficient = 0.0008f;
+
+    /// <summary>Rolling resistance (constant force opposing motion, px/s^2).</summary>
+    public const float BaseRollingResistance = 15f;
+
+    /// <summary>Air drag while airborne (much lower than ground drag).</summary>
+    public const float AirDragCoefficient = 0.0002f;
+
+    // ── Speed Limits ─────────────────────────────────────────────────
+    /// <summary>Minimum speed before stall detection on flat/uphill (px/s).</summary>
+    public const float StallSpeed = 20f;
+
+    /// <summary>Absolute minimum speed on downhill (prevents full stop on gentle downs).</summary>
+    public const float MinDownhillSpeed = 50f;
+
+    /// <summary>Global terminal velocity cap (px/s).</summary>
+    public const float TerminalVelocity = 1200f;
+
+    /// <summary>Starting speed for new runs (px/s).</summary>
+    public const float StartingSpeed = 250f;
+
+    // ── Tuck Modifiers ───────────────────────────────────────────────
+    /// <summary>Drag multiplier when tucking (0.0–1.0, lower = less drag).</summary>
+    public const float TuckDragMultiplier = 0.35f;
+
+    /// <summary>Rolling resistance multiplier when tucking.</summary>
+    public const float TuckRollingResistanceMultiplier = 0.7f;
+
+    /// <summary>Steering authority multiplier when tucking (reduced control).</summary>
+    public const float TuckSteeringMultiplier = 0.5f;
+
+    /// <summary>Acceleration bonus multiplier on downhill while tucking.</summary>
+    public const float TuckDownhillAccelBonus = 1.15f;
+
+    /// <summary>Terminal velocity multiplier when tucking (allows higher top speed).</summary>
+    public const float TuckTerminalVelocityMultiplier = 1.25f;
+
+    // ── Jump / Airborne ──────────────────────────────────────────────
+    /// <summary>Minimum speed required to get any meaningful launch (px/s).</summary>
+    public const float MinLaunchSpeed = 150f;
+
+    /// <summary>Launch angle is derived from terrain normal. This scales the vertical component.</summary>
+    public const float LaunchAngleScale = 1.0f;
+
+    /// <summary>Fall death Y threshold (px below starting ground).</summary>
+    public const float FallDeathY = 1500f;
+
+    // ── Flip Mechanics ───────────────────────────────────────────────
+    /// <summary>Base angular velocity for flips (radians/s). Scales with speed.</summary>
+    public const float FlipBaseAngularVelocity = 8.0f;
+
+    /// <summary>Speed at which flip angular velocity is at base rate (px/s).</summary>
+    public const float FlipSpeedReference = 400f;
+
+    /// <summary>Max angular velocity cap (rad/s) to prevent impossible spins.</summary>
+    public const float FlipMaxAngularVelocity = 14.0f;
+
+    /// <summary>Landing angle tolerance from upright (degrees). Outside = crash.</summary>
+    public const float FlipLandingTolerance = 35f;
+
+    /// <summary>Momentum boost after successful flip (multiplied to speed).</summary>
+    public const float FlipSuccessSpeedBoost = 1.12f;
+
+    /// <summary>Duration of drag reduction window after successful flip (seconds).</summary>
+    public const float FlipSuccessDragWindowDuration = 2.0f;
+
+    /// <summary>Drag multiplier during post-flip bonus window.</summary>
+    public const float FlipSuccessDragMultiplier = 0.5f;
+
+    // ── Terrain Friction Coefficients ────────────────────────────────
+    // These multiply rolling resistance. Lower = less friction = faster.
+    public const float FrictionSnow = 0.7f;
+    public const float FrictionDirt = 1.0f;
+    public const float FrictionIce = 0.3f;
+
+    // ── Terrain Drag Modifiers ───────────────────────────────────────
+    // These multiply aerodynamic drag coefficient on ground.
+    public const float DragModSnow = 0.9f;
+    public const float DragModDirt = 1.1f;
+    public const float DragModIce = 0.6f;
+
+    // ── Coyote Time & Buffers ────────────────────────────────────────
+    public const float CoyoteTime = 0.1f;
+    public const float JumpBufferTime = 0.12f;
+
+    // ── Slope Thresholds ─────────────────────────────────────────────
+    /// <summary>Minimum slope angle (degrees) to count as "downhill" for acceleration.</summary>
+    public const float MinSlopeAngle = 2f;
+
+    /// <summary>Slope angle (degrees) at which uphill stall check begins.</summary>
+    public const float UphillStallAngle = 5f;
+
+    // ── Vehicle Swap ─────────────────────────────────────────────────
+    public const float SwapCooldown = 0.8f;
+
+    /// <summary>Speed penalty multiplier on swap to wrong terrain (e.g. bike on snow).</summary>
+    public const float BadSwapSpeedPenalty = 0.9f;
+}
