@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Hazards/FallingTree.cs" id="1_tree"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_tree"]
+size = Vector2(30, 120)
+
+[node name="FallingTree" type="Area2D"]
+script = ExtResource("1_tree")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_tree")
