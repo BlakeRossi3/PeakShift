@@ -293,6 +293,104 @@ public static class MomentumPhysics
         };
     }
 
+    // ── Jump Clearance — Trajectory Prediction ─────────────────────
+
+    /// <summary>
+    /// Result of a trajectory simulation over a gap.
+    /// </summary>
+    public struct GapClearanceResult
+    {
+        /// <summary>True if the predicted trajectory clears the gap.</summary>
+        public bool Clears;
+        /// <summary>Predicted landing X position (world coordinates).</summary>
+        public float LandingX;
+        /// <summary>Predicted landing Y position (world coordinates).</summary>
+        public float LandingY;
+        /// <summary>Horizontal distance traveled during the jump.</summary>
+        public float JumpDistance;
+    }
+
+    /// <summary>
+    /// Simulates the player's airborne trajectory from the gap lip to predict
+    /// whether they will clear the gap. Uses the same IntegrateAirborne physics
+    /// as the actual flight to ensure prediction matches reality.
+    ///
+    /// The simulation runs forward in time, stepping the velocity through
+    /// gravity and air drag. At each step, it checks if the player has
+    /// descended to or below the landing zone Y level. If they reach the
+    /// landing zone X before that, the gap is cleared.
+    /// </summary>
+    /// <param name="launchPos">World position at gap lip (start of gap).</param>
+    /// <param name="launchVelocity">Velocity vector at moment of launch.</param>
+    /// <param name="gravityMultiplier">Vehicle gravity multiplier.</param>
+    /// <param name="gapEndX">World X of the far edge of the gap.</param>
+    /// <param name="landingY">World Y of the landing zone surface.</param>
+    /// <param name="clearanceRatio">Fraction of gap that must be crossed (0.0–1.0).</param>
+    /// <param name="landingForgiveness">Extra px past gapEndX that count as landed.</param>
+    /// <param name="verticalTolerance">Max px below landingY that still count.</param>
+    /// <returns>GapClearanceResult with prediction details.</returns>
+    public static GapClearanceResult PredictGapClearance(
+        Vector2 launchPos,
+        Vector2 launchVelocity,
+        float gravityMultiplier,
+        float gapStartX,
+        float gapEndX,
+        float landingY,
+        float clearanceRatio,
+        float landingForgiveness,
+        float verticalTolerance)
+    {
+        float dt = PhysicsConstants.TrajectorySimDt;
+        int steps = PhysicsConstants.TrajectorySimSteps;
+
+        Vector2 pos = launchPos;
+        Vector2 vel = launchVelocity;
+
+        float gapWidth = gapEndX - gapStartX;
+        // Minimum X the player must reach to survive
+        float requiredX = gapStartX + gapWidth * clearanceRatio;
+
+        for (int i = 0; i < steps; i++)
+        {
+            vel = IntegrateAirborne(vel, dt, gravityMultiplier);
+            pos += vel * dt;
+
+            // Player has descended to landing zone level or below
+            if (pos.Y >= landingY - verticalTolerance)
+            {
+                bool cleared = pos.X >= requiredX;
+                return new GapClearanceResult
+                {
+                    Clears = cleared,
+                    LandingX = pos.X,
+                    LandingY = pos.Y,
+                    JumpDistance = pos.X - launchPos.X
+                };
+            }
+
+            // Player has passed well beyond the gap — they cleared it
+            if (pos.X > gapEndX + landingForgiveness)
+            {
+                return new GapClearanceResult
+                {
+                    Clears = true,
+                    LandingX = pos.X,
+                    LandingY = pos.Y,
+                    JumpDistance = pos.X - launchPos.X
+                };
+            }
+        }
+
+        // Simulation ran out of steps — treat as failure (player floated too long)
+        return new GapClearanceResult
+        {
+            Clears = false,
+            LandingX = pos.X,
+            LandingY = pos.Y,
+            JumpDistance = pos.X - launchPos.X
+        };
+    }
+
     // ── Terrain Curvature & Centripetal Launch ──────────────────────
 
     /// <summary>

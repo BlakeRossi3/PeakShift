@@ -1,5 +1,6 @@
 using Godot;
 using PeakShift.Physics;
+using static PeakShift.Physics.MomentumPhysics;
 
 namespace PeakShift;
 
@@ -110,6 +111,23 @@ public partial class PlayerController : CharacterBody2D
 
 	// Terrain-hugging: collision shape half-height for snap offset
 	private float _collisionHalfHeight = 32f;
+
+	// ── Jump clearance tracking ────────────────────────────────────
+	// Tracks whether we've evaluated the current gap so we only check once per gap.
+	private bool _gapEvaluated;
+	private float _lastEvaluatedGapStartX = float.MinValue;
+
+	// Debug: last clearance prediction result (read by HUD)
+	public GapClearanceResult LastClearanceResult { get; private set; }
+	public bool LastClearanceValid { get; private set; }
+
+	// ── Debug state (exposed for HUD overlay) ──────────────────────
+	public float DebugSlopeAngleDeg { get; private set; }
+	public float DebugVerticalVelocity { get; private set; }
+	public float DebugForwardVelocity { get; private set; }
+	public bool DebugIsAirborne => CurrentMoveState == MoveState.Airborne || CurrentMoveState == MoveState.Flipping;
+	public string DebugTerrainType => CurrentTerrain.ToString();
+	public bool DebugOverGap { get; private set; }
 
 	// ── Lifecycle ───────────────────────────────────────────────────
 
@@ -254,6 +272,7 @@ public partial class PlayerController : CharacterBody2D
 		}
 
 		_wasOnFloor = IsOnFloor();
+		UpdateDebugState();
 	}
 
 	// ── Grounded Physics ────────────────────────────────────────────
@@ -283,6 +302,8 @@ public partial class PlayerController : CharacterBody2D
 			floorNormal = Vector2.Up;
 			slopeAngleRad = 0f;
 		}
+
+		DebugSlopeAngleDeg = Mathf.RadToDeg(slopeAngleRad);
 
 		// ── Gather modifiers ────────────────────────────────────────
 		float terrainFriction = MomentumPhysics.GetTerrainFriction(CurrentTerrain);
@@ -476,6 +497,11 @@ public partial class PlayerController : CharacterBody2D
 		// Exit tuck on launch
 		if (SkiNode != null) SkiNode.IsTucking = false;
 		_tuckInputHeld = false;
+
+		// ── Jump clearance check ───────────────────────────────────
+		// When launching over a gap, predict trajectory and fail immediately
+		// if the player doesn't have enough momentum to clear.
+		EvaluateGapClearance();
 	}
 
 	private void EnterFlipping()
@@ -644,7 +670,83 @@ public partial class PlayerController : CharacterBody2D
 
 		CurrentTerrain = TerrainType.Snow;
 
+		_gapEvaluated = false;
+		_lastEvaluatedGapStartX = float.MinValue;
+		LastClearanceValid = false;
+
 		GD.Print("[PlayerController] Reset for new run");
+	}
+
+	// ── Jump Clearance ──────────────────────────────────────────
+
+	/// <summary>
+	/// Evaluates whether the player can clear the current/next gap based on
+	/// their launch velocity. Called once per gap when transitioning to airborne.
+	/// If the trajectory prediction says the player will land short, the run
+	/// ends immediately — this is the core "momentum-or-die" rule.
+	/// </summary>
+	private void EvaluateGapClearance()
+	{
+		if (_terrainManager == null) return;
+
+		var gap = _terrainManager.GetCurrentOrNextGap(GlobalPosition.X);
+		if (!gap.Found) return;
+
+		// Only evaluate each gap once (avoid re-checking on centripetal bounces
+		// within the same gap region)
+		if (Mathf.IsEqualApprox(_lastEvaluatedGapStartX, gap.GapStartX, 1f))
+			return;
+
+		// Only evaluate if we're near the gap (within ramp approach distance)
+		float distToGap = gap.GapStartX - GlobalPosition.X;
+		if (distToGap > 200f) return; // Too far from gap, this is a mid-descent launch
+
+		_lastEvaluatedGapStartX = gap.GapStartX;
+		_gapEvaluated = true;
+
+		float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
+
+		var result = MomentumPhysics.PredictGapClearance(
+			GlobalPosition,
+			_airVelocity,
+			gravMult,
+			gap.GapStartX,
+			gap.GapEndX,
+			gap.LandingY,
+			PhysicsConstants.GapClearanceRatio,
+			PhysicsConstants.LandingForgivenessPx,
+			PhysicsConstants.LandingVerticalTolerancePx);
+
+		LastClearanceResult = result;
+		LastClearanceValid = true;
+
+		if (!result.Clears)
+		{
+			GD.Print($"[PlayerController] Gap clearance FAILED — speed: {MomentumSpeed:F0}, " +
+				$"predicted landing: ({result.LandingX:F0}, {result.LandingY:F0}), " +
+				$"gap: {gap.GapStartX:F0}–{gap.GapEndX:F0}, needed: {gap.GapStartX + gap.Width * PhysicsConstants.GapClearanceRatio:F0}");
+			OnCrash("Insufficient momentum to clear gap");
+		}
+		else
+		{
+			GD.Print($"[PlayerController] Gap clearance OK — predicted landing X: {result.LandingX:F0}, " +
+				$"jump distance: {result.JumpDistance:F0}px, gap width: {gap.Width:F0}px");
+		}
+	}
+
+	/// <summary>
+	/// Updates debug-exposed state each frame. Called from _PhysicsProcess
+	/// so the HUD debug overlay can read current values.
+	/// </summary>
+	private void UpdateDebugState()
+	{
+		DebugForwardVelocity = CurrentMoveState is MoveState.Airborne or MoveState.Flipping
+			? _airVelocity.X
+			: MomentumSpeed;
+		DebugVerticalVelocity = CurrentMoveState is MoveState.Airborne or MoveState.Flipping
+			? _airVelocity.Y
+			: Velocity.Y;
+		DebugOverGap = _terrainManager?.IsOverGap(GlobalPosition.X) ?? false;
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────

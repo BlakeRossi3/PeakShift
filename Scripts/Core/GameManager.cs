@@ -87,6 +87,18 @@ public partial class GameManager : Node
 			_terrainManager.PlayerNode = _player;
 		}
 
+		// Give HUD a reference to the player for the debug overlay
+		if (_hud != null && _player != null)
+		{
+			_hud.PlayerRef = _player;
+		}
+
+		// Give HUD a reference to the terrain manager for module debug info
+		if (_hud != null && _terrainManager != null)
+		{
+			_hud.TerrainRef = _terrainManager;
+		}
+
 		ConnectSignals();
 
 		GD.Print("[GameManager] Initialized — state: Menu");

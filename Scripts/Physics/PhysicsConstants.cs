@@ -105,6 +105,41 @@ public static class PhysicsConstants
     /// <summary>Upward velocity impulse applied when initiating a flip (px/s). Acts like an air-jump.</summary>
     public const float FlipLaunchImpulse = -350f;
 
+    // ── Jump Clearance ─────────────────────────────────────────────
+    // These parameters govern the "must-clear-the-gap" momentum rule.
+    // If the player's trajectory won't reach the landing zone, the run ends.
+
+    /// <summary>
+    /// Fraction of the gap the player must clear to survive (0.0–1.0).
+    /// At 0.85, the player must land within the last 15% of the gap or beyond.
+    /// Provides a small forgiveness buffer so brushing the far edge doesn't kill.
+    /// </summary>
+    public const float GapClearanceRatio = 0.85f;
+
+    /// <summary>
+    /// Extra horizontal distance (px) past the gap end that still counts as a valid landing.
+    /// Prevents pixel-perfect frustration on close calls.
+    /// </summary>
+    public const float LandingForgivenessPx = 40f;
+
+    /// <summary>
+    /// Maximum vertical distance (px) below the landing zone surface that still counts
+    /// as a successful landing. Handles slight terrain dips at the gap edge.
+    /// </summary>
+    public const float LandingVerticalTolerancePx = 60f;
+
+    /// <summary>
+    /// Number of simulation steps for trajectory prediction during gap crossing.
+    /// Higher = more accurate but slightly more CPU. 60 ≈ 1 second of flight at 60fps.
+    /// </summary>
+    public const int TrajectorySimSteps = 120;
+
+    /// <summary>
+    /// Time step (seconds) per trajectory simulation step.
+    /// Matches physics tick rate for accuracy.
+    /// </summary>
+    public const float TrajectorySimDt = 1f / 60f;
+
     // ── Terrain Friction Coefficients ────────────────────────────────
     // These multiply rolling resistance. Lower = less friction = faster.
     public const float FrictionSnow = 0.7f;

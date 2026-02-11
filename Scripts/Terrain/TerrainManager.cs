@@ -1,18 +1,17 @@
 using System.Collections.Generic;
 using Godot;
-using PeakShift.Core;
+using PeakShift.Terrain;
 
 namespace PeakShift;
 
 /// <summary>
-/// Run-based procedural terrain generator. Each "run" is a repeating cycle:
+/// Modular track generation manager. Delegates to ModuleTrackGenerator for
+/// module selection and placement, then renders terrain chunks with object pooling.
 ///
-///   Descent (long downhill) → Ramp (smooth upward curve) → Gap (airborne)
+/// Public API is preserved from the original TerrainManager so PlayerController,
+/// GameManager, and HUD continue to work without changes.
 ///
-/// The descent uses a cosine S-curve (flat → steep → flat at bottom).
-/// The ramp uses a cosine quarter-curve (flat at bottom → steep upward at lip).
-/// This guarantees every gap has a proper ski-jump ramp and the game always
-/// feels downhill. Terrain type changes between runs.
+/// Debug: Press F4 to preview-spawn the next N modules in the console log.
 /// </summary>
 public partial class TerrainManager : Node2D
 {
@@ -32,6 +31,12 @@ public partial class TerrainManager : Node2D
     [Export]
     public float DespawnDistance { get; set; } = 2000f;
 
+    [Export]
+    public int PreviewModuleCount { get; set; } = 10;
+
+    [Export]
+    public int PoolPrewarmCount { get; set; } = 20;
+
     /// <summary>Reference to the player node, set by GameManager.</summary>
     public CharacterBody2D PlayerNode { get; set; }
 
@@ -41,69 +46,57 @@ public partial class TerrainManager : Node2D
     private const float BaseGroundY = 200f;
     private const float PointSpacing = 32f;
     private const float SpawnX = -256f;
-
-    // Intro run — long steep descent (5-10s) flowing into first ramp launch
-    private const float IntroDescentLength = 5000f;
-    private const float IntroDescentDrop = 8000f;
-    private const float IntroRampLength = 500f;
-    private const float IntroRampRise = 350f;
-    private const float IntroGapWidth = 250f;
-
-    // Extra downhill gradient added per pixel of descent length
-    private const float DownhillGradient = 0.14f;
-
-    // Gap sizing — base range before steepness scaling
-    private const float MinGapBase = 120f;
-    private const float MaxGapBase = 280f;
-
-    // Steepness-to-gap multiplier: gap = base + steepness * this
-    private const float GapSteepnessScale = 2000f;
-
-    // Fill polygon extends this far below the deepest surface point in each chunk
     private const float FillDepthBelowSurface = 1000f;
 
-    // ── Run definition ──────────────────────────────────────────
+    // ── Module system ────────────────────────────────────────────
 
-    private class TerrainRun
-    {
-        public float DescentStartX;
-        public float DescentStartY;
-        public float DescentLength;
-        public float DescentDrop;   // total Y increase (going down on screen)
-        public float RampLength;
-        public float RampRise;      // Y decrease (going up on screen)
-        public float GapWidth;
-        public TerrainType Type;
+    private ModuleTrackGenerator _generator;
+    private ModuleCatalog _catalog;
+    private DifficultyProfile _difficulty;
+    private ModulePool _pool;
 
-        // Computed positions
-        public float RampStartX => DescentStartX + DescentLength;
-        public float RampStartY => DescentStartY + DescentDrop;
-        public float RampEndY => RampStartY - RampRise;
-        public float GapStartX => RampStartX + RampLength;
-        public float GapEndX => GapStartX + GapWidth;
-    }
-
-    // ── State ────────────────────────────────────────────────────
+    // ── Chunk tracking ───────────────────────────────────────────
 
     public List<ChunkInstance> ActiveChunks { get; } = new();
 
     private float _nextSpawnX;
-    private readonly RandomNumberGenerator _rng = new();
-    private BiomeManager _biomeManager;
 
-    // Run generation
-    private readonly List<TerrainRun> _runs = new();
-    private float _nextRunStartX;
-    private float _nextRunStartY;
-    private int _runCount;
-    private int _currentSpawnRunIndex;
-
-    // Terrain type sections (multiple runs of same type)
-    private int _runsUntilTypeChange;
-    private TerrainType _currentSectionType = TerrainType.Snow;
-
-    // Chunk entry tracking (separate from generation)
+    // Terrain type change detection
     private TerrainType _lastEnteredType = TerrainType.Snow;
+
+    // ── Debug ────────────────────────────────────────────────────
+
+    /// <summary>Last placed module count (for debug overlay).</summary>
+    public int DebugPlacedModuleCount => _generator?.PlacedModules.Count ?? 0;
+
+    /// <summary>Current generation distance (for debug overlay).</summary>
+    public float DebugTotalDistance => _generator?.TotalDistance ?? 0f;
+
+    /// <summary>Pool stats for debug overlay.</summary>
+    public int DebugPoolAvailable => _pool?.Available ?? 0;
+    public int DebugPoolTotal => _pool?.TotalCreated ?? 0;
+
+    /// <summary>Returns info about the current module at the given world X.</summary>
+    public string DebugModuleInfoAt(float worldX)
+    {
+        if (_generator == null) return "N/A";
+
+        foreach (var mod in _generator.PlacedModules)
+        {
+            if (worldX >= mod.WorldStartX && worldX < mod.WorldEndX)
+            {
+                return $"{mod.Template.Shape} D{mod.Template.Difficulty} " +
+                       $"{mod.Template.EntryTerrain}" +
+                       (mod.Template.IsTransition ? $"→{mod.Template.ExitTerrain}" : "") +
+                       (mod.Template.HasJump ? $" [GAP {mod.ScaledGapWidth:F0}px]" : "");
+            }
+        }
+
+        if (_generator.IsOverGap(worldX))
+            return "AIRBORNE (gap)";
+
+        return "?";
+    }
 
     // ── Inner types ──────────────────────────────────────────────
 
@@ -112,7 +105,7 @@ public partial class TerrainManager : Node2D
         public TerrainType Type { get; init; }
         public float WorldX { get; init; }
         public float Width { get; init; }
-        public Node2D SceneNode { get; init; }
+        public StaticBody2D SceneNode { get; init; }
         public bool IsGap { get; init; }
     }
 
@@ -120,147 +113,82 @@ public partial class TerrainManager : Node2D
 
     public override void _Ready()
     {
-        _rng.Randomize();
-        _nextRunStartX = SpawnX;
-        _nextRunStartY = BaseGroundY;
-        _nextSpawnX = SpawnX;
-        _currentSpawnRunIndex = 0;
-        _runsUntilTypeChange = 0;
-        _biomeManager = GetNodeOrNull<BiomeManager>("../BiomeManager");
+        // Build module system
+        _catalog = ModuleCatalog.BuildDefaultCatalog();
+        _difficulty = new DifficultyProfile();
+        _generator = new ModuleTrackGenerator(_catalog, _difficulty)
+        {
+            LookaheadModules = 12,
+            DespawnBehind = DespawnDistance
+        };
+        _pool = new ModulePool(this, PoolPrewarmCount);
 
-        EnsureRunsTo(_nextSpawnX + MaxChunkWidth * (ChunksAhead + 4));
+        // Initialize generator
+        _generator.Initialize(SpawnX, BaseGroundY);
+
+        // Spawn initial chunks
+        _nextSpawnX = SpawnX;
+
         for (int i = 0; i < ChunksAhead; i++)
             SpawnNextChunk();
 
-        GD.Print("[TerrainManager] Initialized with run-based terrain");
+        GD.Print("[TerrainManager] Initialized with modular track generator");
+        GD.Print($"[TerrainManager] Catalog: {_catalog.All.Count} modules, " +
+                 $"Pool: {_pool.TotalCreated} pre-warmed");
     }
 
     public override void _PhysicsProcess(double delta)
     {
         float playerX = PlayerNode?.GlobalPosition.X ?? 0f;
 
+        // Update generator (generates ahead, trims behind)
+        _generator.Update(playerX);
+
+        // Recycle rendered chunks behind the player
         RecycleChunks(playerX);
 
+        // Spawn new chunks
         while (ActiveChunks.Count < ChunksAhead)
             SpawnNextChunk();
 
-        CheckChunkEntry(playerX);
+        // Detect terrain type changes
+        CheckTerrainChange(playerX);
     }
 
-    // ── Run generation ──────────────────────────────────────────
-
-    private void EnsureRunsTo(float worldX)
+    public override void _UnhandledInput(InputEvent @event)
     {
-        float target = worldX + MaxChunkWidth * (ChunksAhead + 4);
-        while (_runs.Count == 0 || _runs[^1].GapEndX < target)
-            GenerateNextRun();
+        // F4: Preview mode — log the next N modules
+        if (@event is InputEventKey key && key.Pressed && key.Keycode == Key.F4)
+        {
+            var preview = _generator.PreviewGenerate(PreviewModuleCount);
+            GD.Print($"[TerrainManager] ═══ Preview: next {preview.Count} modules ═══");
+            foreach (var mod in preview)
+            {
+                GD.Print($"  [{mod.SequenceIndex}] {mod.Template.Shape} " +
+                         $"D{mod.Template.Difficulty} " +
+                         $"{mod.Template.EntryTerrain}" +
+                         (mod.Template.IsTransition ? $"→{mod.Template.ExitTerrain}" : "") +
+                         $" | X: {mod.WorldStartX:F0}→{mod.WorldEndX:F0} " +
+                         $"Y: {mod.EntryY:F0}→{mod.ExitY:F0}" +
+                         (mod.Template.HasJump ? $" [GAP {mod.ScaledGapWidth:F0}px]" : ""));
+            }
+            GD.Print("[TerrainManager] ═══════════════════════════════════");
+        }
     }
 
-    private void GenerateNextRun()
-    {
-        bool isFirst = _runCount == 0;
-
-        // Terrain type — changes every few runs
-        if (_runsUntilTypeChange <= 0)
-        {
-            _currentSectionType = SelectTerrainType();
-            int min = _runCount < 3 ? 3 : 2;
-            int max = _runCount < 3 ? 5 : 4;
-            _runsUntilTypeChange = _rng.RandiRange(min, max);
-        }
-        _runsUntilTypeChange--;
-
-        float descentLength, descentBaseDrop, rampLength, rampRise, gapWidth;
-
-        if (isFirst)
-        {
-            // ── Intro run — long steep descent into first ramp ────
-            descentLength = IntroDescentLength;
-            descentBaseDrop = IntroDescentDrop;
-            rampLength = IntroRampLength;
-            rampRise = IntroRampRise;
-            gapWidth = IntroGapWidth;
-        }
-        else
-        {
-            // ── Regular runs (significantly steeper) ─────────────
-            descentLength = _rng.RandfRange(1200f, 3000f);
-            descentBaseDrop = _rng.RandfRange(500f, 1100f);
-            rampLength = _rng.RandfRange(200f, 550f);
-            rampRise = _rng.RandfRange(100f, 400f);
-
-            float rampSteepness = rampRise / rampLength;
-            float gapBase = _rng.RandfRange(MinGapBase, MaxGapBase);
-            gapWidth = gapBase + rampSteepness * GapSteepnessScale;
-        }
-
-        // Downhill gradient compounds steepness on longer descents
-        float descentDrop = descentBaseDrop + descentLength * DownhillGradient;
-
-        var run = new TerrainRun
-        {
-            DescentStartX = _nextRunStartX,
-            DescentStartY = _nextRunStartY,
-            DescentLength = descentLength,
-            DescentDrop = descentDrop,
-            RampLength = rampLength,
-            RampRise = rampRise,
-            GapWidth = gapWidth,
-            Type = _currentSectionType,
-        };
-        _runs.Add(run);
-
-        // Next run landing: slightly below the ramp lip
-        float landingOffset = _rng.RandfRange(30f, 80f);
-        _nextRunStartX = run.GapEndX;
-        _nextRunStartY = run.RampEndY + landingOffset;
-
-        _runCount++;
-    }
-
-    // ── Terrain height function ─────────────────────────────────
+    // ── Public API (preserved for PlayerController compatibility) ──
 
     /// <summary>
     /// Returns the terrain surface Y at the given world X position.
-    /// Uses run-based segments: cosine S-curve descents and cosine ramps.
-    /// Public so PlayerController can query slope geometry.
+    /// Delegates to the modular track generator.
     /// </summary>
     public float GetTerrainHeight(float worldX)
     {
-        EnsureRunsTo(worldX);
-
-        for (int i = 0; i < _runs.Count; i++)
-        {
-            var run = _runs[i];
-
-            if (worldX < run.DescentStartX) continue;
-            if (worldX >= run.GapEndX) continue;
-
-            // ── Descent: cosine S-curve (flat → steep → flat) ───
-            if (worldX < run.RampStartX)
-            {
-                float t = (worldX - run.DescentStartX) / run.DescentLength;
-                return run.DescentStartY + run.DescentDrop * (1f - Mathf.Cos(t * Mathf.Pi)) / 2f;
-            }
-
-            // ── Ramp: cosine quarter-curve (flat at bottom → steep upward at lip)
-            if (worldX < run.GapStartX)
-            {
-                float t = (worldX - run.RampStartX) / run.RampLength;
-                return run.RampStartY - run.RampRise * (1f - Mathf.Cos(t * Mathf.Pi / 2f));
-            }
-
-            // ── Gap: return lip height (used for fall detection) ─
-            return run.RampEndY;
-        }
-
-        return BaseGroundY;
+        return _generator.GetHeight(worldX);
     }
 
     /// <summary>
     /// Returns the approximate terrain surface normal at a given world X position.
-    /// Computed by sampling two nearby points and finding the perpendicular.
-    /// Used by PlayerController for launch angle calculations.
     /// </summary>
     public Vector2 GetTerrainNormalAt(float worldX)
     {
@@ -279,84 +207,165 @@ public partial class TerrainManager : Node2D
 
     /// <summary>
     /// Returns the Y position of the terrain surface at the start of the world.
-    /// Used by PlayerController to position the player correctly on reset.
     /// </summary>
     public float GetStartingSurfaceY()
     {
         return GetTerrainHeight(SpawnX);
     }
 
-    // ── Chunk spawning ──────────────────────────────────────────
+    // ── Gap query API ────────────────────────────────────────────
+
+    public struct GapInfo
+    {
+        public bool Found;
+        public float GapStartX;
+        public float GapEndX;
+        public float LipY;
+        public float LandingY;
+        public float Width;
+        public TerrainType Type;
+    }
+
+    public GapInfo GetCurrentOrNextGap(float worldX)
+    {
+        var genGap = _generator.GetCurrentOrNextGap(worldX);
+        return new GapInfo
+        {
+            Found = genGap.Found,
+            GapStartX = genGap.GapStartX,
+            GapEndX = genGap.GapEndX,
+            LipY = genGap.LipY,
+            LandingY = genGap.LandingY,
+            Width = genGap.Width,
+            Type = genGap.Type
+        };
+    }
+
+    public bool IsOverGap(float worldX)
+    {
+        return _generator.IsOverGap(worldX);
+    }
+
+    // ── Chunk spawning (renders modules as terrain geometry) ─────
 
     public void SpawnNextChunk()
     {
-        EnsureRunsTo(_nextSpawnX + MaxChunkWidth * ChunksAhead);
+        if (_generator.PlacedModules.Count == 0) return;
 
-        // Advance to the current run
-        while (_currentSpawnRunIndex < _runs.Count - 1
-               && _nextSpawnX >= _runs[_currentSpawnRunIndex].GapEndX)
+        // Find which module contains _nextSpawnX
+        ModuleTrackGenerator.PlacedModule currentMod = null;
+        for (int i = 0; i < _generator.PlacedModules.Count; i++)
         {
-            _currentSpawnRunIndex++;
+            var mod = _generator.PlacedModules[i];
+
+            // Check if we're in this module's surface area
+            if (_nextSpawnX >= mod.WorldStartX && _nextSpawnX < mod.WorldEndX)
+            {
+                currentMod = mod;
+                break;
+            }
+
+            // Check if we're in this module's gap
+            if (mod.Template.HasJump && _nextSpawnX >= mod.GapStartX && _nextSpawnX < mod.GapEndX)
+            {
+                // Spawn gap chunk and skip past it
+                float gapRemaining = mod.GapEndX - _nextSpawnX;
+                ActiveChunks.Add(new ChunkInstance
+                {
+                    Type = mod.Template.ExitTerrain,
+                    WorldX = _nextSpawnX,
+                    Width = gapRemaining,
+                    SceneNode = null,
+                    IsGap = true
+                });
+                _nextSpawnX = mod.GapEndX;
+                return;
+            }
         }
 
-        var run = _runs[_currentSpawnRunIndex];
-
-        // ── In a gap: create gap instance and skip past it ──────
-        if (_nextSpawnX >= run.GapStartX && _nextSpawnX < run.GapEndX)
+        if (currentMod == null)
         {
-            float gapRemaining = run.GapEndX - _nextSpawnX;
-            ActiveChunks.Add(new ChunkInstance
+            // We're past all placed modules — advance to find one
+            if (_generator.PlacedModules.Count > 0)
             {
-                Type = run.Type,
-                WorldX = _nextSpawnX,
-                Width = gapRemaining,
-                SceneNode = null,
-                IsGap = true
-            });
-            _nextSpawnX = run.GapEndX;
+                var last = _generator.PlacedModules[^1];
+                if (_nextSpawnX < last.GapEndX)
+                {
+                    // Find the right module
+                    foreach (var mod in _generator.PlacedModules)
+                    {
+                        if (mod.WorldStartX > _nextSpawnX)
+                        {
+                            _nextSpawnX = mod.WorldStartX;
+                            currentMod = mod;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (currentMod == null)
+                return;  // Nothing to spawn yet
+        }
+
+        // Determine chunk width (shorter if module end or gap is nearby)
+        float distToEnd = currentMod.WorldEndX - _nextSpawnX;
+        float chunkWidth = Mathf.Min(MaxChunkWidth, distToEnd);
+
+        if (chunkWidth < 32f)
+        {
+            _nextSpawnX = currentMod.WorldEndX;
             return;
         }
 
-        // ── Determine chunk width (shorter if gap is nearby) ────
-        float distToGap = run.GapStartX - _nextSpawnX;
-        float chunkWidth = Mathf.Min(MaxChunkWidth, distToGap);
+        // Determine terrain type at this position
+        float t = (_nextSpawnX - currentMod.WorldStartX) / currentMod.Length;
+        TerrainType terrainType = currentMod.Template.GetTerrainTypeAt(t);
 
-        // Skip tiny slivers
-        if (chunkWidth < 32f)
+        // For gap modules, don't render surface geometry
+        if (currentMod.IsGapModule)
         {
-            _nextSpawnX = run.GapStartX;
+            ActiveChunks.Add(new ChunkInstance
+            {
+                Type = terrainType,
+                WorldX = _nextSpawnX,
+                Width = chunkWidth,
+                SceneNode = null,
+                IsGap = true
+            });
+            _nextSpawnX += chunkWidth;
             return;
         }
 
         int resolution = Mathf.Max(3, (int)(chunkWidth / PointSpacing) + 1);
-        CreateTerrainChunk(_nextSpawnX, chunkWidth, resolution, run.Type);
+        CreateTerrainChunk(_nextSpawnX, chunkWidth, resolution, terrainType, currentMod);
         _nextSpawnX += chunkWidth;
     }
 
-    private void CreateTerrainChunk(float worldX, float width, int resolution, TerrainType terrainType)
+    private void CreateTerrainChunk(float worldX, float width, int resolution,
+                                     TerrainType terrainType,
+                                     ModuleTrackGenerator.PlacedModule module)
     {
-        var body = new StaticBody2D();
+        var body = _pool.Acquire();
         body.Position = new Vector2(worldX, 0);
-        body.ZIndex = -1;
 
         float spacing = width / (resolution - 1);
 
-        // Generate surface height points
+        // Generate surface height points from the module's curve
         var surfacePoints = new Vector2[resolution];
         float maxSurfaceY = float.MinValue;
         for (int i = 0; i < resolution; i++)
         {
             float localX = i * spacing;
             float wx = worldX + localX;
-            float y = GetTerrainHeight(wx);
+            float y = module.HeightAt(wx);
             surfacePoints[i] = new Vector2(localX, y);
             if (y > maxSurfaceY) maxSurfaceY = y;
         }
 
-        // Dynamic fill depth — always well below the deepest surface point
         float fillDepth = maxSurfaceY + FillDepthBelowSurface;
 
-        // Build closed polygon: surface points + deep fill
+        // Build closed polygon
         var polyPoints = new Vector2[resolution + 2];
         for (int i = 0; i < resolution; i++)
             polyPoints[i] = surfacePoints[i];
@@ -382,8 +391,6 @@ public partial class TerrainManager : Node2D
         var collision = new CollisionPolygon2D { Polygon = polyPoints };
         body.AddChild(collision);
 
-        AddChild(body);
-
         ActiveChunks.Add(new ChunkInstance
         {
             Type = terrainType,
@@ -401,77 +408,43 @@ public partial class TerrainManager : Node2D
         ActiveChunks.RemoveAll(chunk =>
         {
             bool shouldRemove = (playerX - (chunk.WorldX + chunk.Width)) > DespawnDistance;
-            if (shouldRemove)
-                chunk.SceneNode?.QueueFree();
+            if (shouldRemove && chunk.SceneNode != null)
+                _pool.Release(chunk.SceneNode);
             return shouldRemove;
         });
-
-        // Trim old runs the player has long passed
-        while (_runs.Count > 2 && _runs[0].GapEndX < playerX - DespawnDistance)
-        {
-            _runs.RemoveAt(0);
-            _currentSpawnRunIndex = Mathf.Max(0, _currentSpawnRunIndex - 1);
-        }
     }
 
     /// <summary>Clear all chunks and reset for a new run.</summary>
     public void Reset()
     {
         foreach (var chunk in ActiveChunks)
-            chunk.SceneNode?.QueueFree();
+        {
+            if (chunk.SceneNode != null)
+                _pool.Release(chunk.SceneNode);
+        }
         ActiveChunks.Clear();
-        _runs.Clear();
 
-        _nextRunStartX = SpawnX;
-        _nextRunStartY = BaseGroundY;
+        // Re-initialize generator
+        _generator.Initialize(SpawnX, BaseGroundY);
         _nextSpawnX = SpawnX;
-        _currentSpawnRunIndex = 0;
-        _runCount = 0;
-        _runsUntilTypeChange = 0;
+
         _lastEnteredType = TerrainType.Snow;
 
-        EnsureRunsTo(_nextSpawnX + MaxChunkWidth * (ChunksAhead + 4));
         for (int i = 0; i < ChunksAhead; i++)
             SpawnNextChunk();
+
+        GD.Print("[TerrainManager] Reset with modular track generator");
     }
 
-    // ── Terrain type selection ──────────────────────────────────
+    // ── Terrain type change detection ────────────────────────────
 
-    private TerrainType SelectTerrainType()
+    private void CheckTerrainChange(float playerX)
     {
-        if (_biomeManager?.CurrentBiome == null)
-            return _rng.Randf() > 0.5f ? TerrainType.Snow : TerrainType.Dirt;
-
-        var ratios = _biomeManager.CurrentBiome.GetTerrainRatios();
-        float roll = _rng.Randf();
-        float cumulative = 0f;
-
-        foreach (var (type, ratio) in ratios)
+        var terrainType = _generator.GetTerrainTypeAt(playerX);
+        if (terrainType != _lastEnteredType)
         {
-            cumulative += ratio;
-            if (roll <= cumulative)
-                return type;
-        }
-
-        return TerrainType.Snow;
-    }
-
-    // ── Chunk entry detection ───────────────────────────────────
-
-    private void CheckChunkEntry(float playerX)
-    {
-        foreach (var chunk in ActiveChunks)
-        {
-            float chunkEnd = chunk.WorldX + chunk.Width;
-            if (playerX >= chunk.WorldX && playerX < chunkEnd)
-            {
-                if (chunk.Type != _lastEnteredType)
-                {
-                    _lastEnteredType = chunk.Type;
-                    EmitSignal(SignalName.TerrainChanged, (int)chunk.Type);
-                }
-                break;
-            }
+            _lastEnteredType = terrainType;
+            EmitSignal(SignalName.TerrainChanged, (int)terrainType);
         }
     }
 
