@@ -1,0 +1,32 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Core/GameManager.cs" id="1"]
+[ext_resource type="Script" path="res://Scripts/Core/RunManager.cs" id="2"]
+[ext_resource type="Script" path="res://Scripts/Player/PlayerController.cs" id="3"]
+[ext_resource type="Script" path="res://Scripts/Terrain/TerrainManager.cs" id="4"]
+[ext_resource type="Script" path="res://Scripts/Audio/AudioManager.cs" id="5"]
+[ext_resource type="Texture2D" path="res://Assets/Art/Characters/player_placeholder.png" id="6"]
+
+[node name="Main" type="Node2D"]
+
+[node name="GameManager" type="Node" parent="."]
+script = ExtResource("1")
+
+[node name="RunManager" type="Node" parent="."]
+script = ExtResource("2")
+
+[node name="AudioManager" type="Node" parent="."]
+script = ExtResource("5")
+
+[node name="Player" type="CharacterBody2D" parent="."]
+script = ExtResource("3")
+
+[node name="Sprite2D" type="Sprite2D" parent="Player"]
+texture = ExtResource("6")
+
+[node name="PlayerCamera" type="Camera2D" parent="Player"]
+position_smoothing_enabled = true
+position_smoothing_speed = 5.0
+
+[node name="TerrainManager" type="Node2D" parent="."]
+script = ExtResource("4")
