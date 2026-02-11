@@ -1,0 +1,83 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/UI/HUDController.cs" id="1_hud"]
+
+[node name="HUD" type="CanvasLayer"]
+script = ExtResource("1_hud")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+
+[node name="DistanceLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "0m"
+
+[node name="ScoreLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "0"
+
+[node name="MultiplierLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "x1.0"
+
+[node name="TerrainPreviewContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="TerrainPreview0" type="ColorRect" parent="MarginContainer/VBoxContainer/TerrainPreviewContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(30, 20)
+color = Color(1, 1, 1, 1)
+
+[node name="TerrainPreview1" type="ColorRect" parent="MarginContainer/VBoxContainer/TerrainPreviewContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(30, 20)
+color = Color(1, 1, 1, 1)
+
+[node name="TerrainPreview2" type="ColorRect" parent="MarginContainer/VBoxContainer/TerrainPreviewContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(30, 20)
+color = Color(1, 1, 1, 1)
+
+[node name="TerrainPreview3" type="ColorRect" parent="MarginContainer/VBoxContainer/TerrainPreviewContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(30, 20)
+color = Color(1, 1, 1, 1)
+
+[node name="TerrainPreview4" type="ColorRect" parent="MarginContainer/VBoxContainer/TerrainPreviewContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(30, 20)
+color = Color(1, 1, 1, 1)
+
+[node name="VehicleIcon" type="TextureRect" parent="MarginContainer/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(48, 48)
+stretch_mode = 5
+
+[node name="SwapButton" type="TextureButton" parent="."]
+unique_name_in_owner = true
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -116.0
+offset_top = -116.0
+offset_right = -20.0
+offset_bottom = -20.0
