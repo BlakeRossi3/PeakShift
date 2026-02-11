@@ -326,11 +326,17 @@ public class ModuleTrackGenerator
         int maxSameRun = _difficulty.GetMaxSameTerrainRun(_totalDistance);
 
         bool mustSwitch = _sameTerrainCount >= maxSameRun;
-        bool shouldJump = _modulesSinceLastJump >= 3;  // At least one jump every ~4 modules
+        bool shouldJump = _modulesSinceLastJump >= 2;  // At least one jump every ~3 modules
 
         TrackModule selected;
 
-        if (mustSwitch)
+        // If both jump and switch are needed, prioritize jump every other time
+        if (mustSwitch && shouldJump && _modulesSinceLastJump >= 3)
+        {
+            // Really need a jump - try to get a transition with jump
+            selected = SelectTransitionJumpModule(maxDiff);
+        }
+        else if (mustSwitch)
         {
             // Must place a transition piece
             selected = SelectTransitionModule(maxDiff);
@@ -342,11 +348,33 @@ public class ModuleTrackGenerator
         }
         else
         {
-            // Normal selection: descent, flat, or ramp-no-jump
+            // Normal selection: descent, flat, bump, or ramp-no-jump
             selected = SelectNormalModule(maxDiff);
         }
 
         PlaceModule(selected);
+    }
+
+    private TrackModule SelectTransitionJumpModule(int maxDiff)
+    {
+        // Try to find a transition module with a jump
+        var targets = new List<TerrainType>();
+        if (_currentTerrain != TerrainType.Snow) targets.Add(TerrainType.Snow);
+        if (_currentTerrain != TerrainType.Dirt) targets.Add(TerrainType.Dirt);
+        if (_currentTerrain != TerrainType.Ice && maxDiff >= 2) targets.Add(TerrainType.Ice);
+
+        var targetTerrain = targets[_rng.RandiRange(0, targets.Count - 1)];
+
+        var candidates = _catalog.QueryTransitions(_currentTerrain, targetTerrain);
+        candidates.RemoveAll(m => m.Difficulty > maxDiff || m.MinDistance > _totalDistance);
+
+        // Prefer transition modules with jumps
+        var jumpTransitions = candidates.FindAll(m => m.HasJump);
+        if (jumpTransitions.Count > 0)
+            return WeightedSelect(jumpTransitions);
+
+        // Fallback to regular transition
+        return SelectTransitionModule(maxDiff);
     }
 
     private TrackModule SelectTransitionModule(int maxDiff)

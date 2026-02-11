@@ -26,10 +26,10 @@ public class DifficultyProfile
     // ── Terrain switching ────────────────────────────────────────
 
     /// <summary>Maximum same-type modules in a row at the start.</summary>
-    public int MaxSameTerrainEarly { get; set; } = 3;
+    public int MaxSameTerrainEarly { get; set; } = 5;
 
     /// <summary>Maximum same-type modules in a row at high difficulty.</summary>
-    public int MaxSameTerrainLate { get; set; } = 1;
+    public int MaxSameTerrainLate { get; set; } = 2;
 
     /// <summary>Distance at which switching becomes most aggressive.</summary>
     public float MaxSwitchFrequencyDistance { get; set; } = 12000f;

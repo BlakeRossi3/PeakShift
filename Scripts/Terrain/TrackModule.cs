@@ -12,6 +12,7 @@ namespace PeakShift.Terrain;
 ///   Gap       — Empty airborne section. Clear-or-die.
 ///   Transition— Short blending piece that switches terrain type mid-module.
 ///   Flat      — Brief flat/micro-bump section for pacing variety.
+///   Bump      — Single smooth roller (up then down) for varied terrain.
 /// </summary>
 [GlobalClass]
 public partial class TrackModule : Resource
@@ -24,7 +25,8 @@ public partial class TrackModule : Resource
         Ramp,
         Gap,
         Transition,
-        Flat
+        Flat,
+        Bump  // Small roller: goes up then back down
     }
 
     /// <summary>The geometric shape of this module.</summary>
@@ -110,6 +112,7 @@ public partial class TrackModule : Resource
             ModuleShape.Gap => entryY,  // gaps are flat (lip to landing)
             ModuleShape.Transition => entryY + Drop,
             ModuleShape.Flat => entryY + Drop,  // Drop should be ~0 or small
+            ModuleShape.Bump => entryY + Drop,  // Bump: net drop (or rise if negative)
             _ => entryY
         };
     }
@@ -138,6 +141,10 @@ public partial class TrackModule : Resource
 
             // Flat: gentle micro-bumps using a small sine wave
             ModuleShape.Flat => entryY + Drop * t + 8f * Mathf.Sin(t * Mathf.Pi * 4f),
+
+            // Bump: single smooth roller (up then down) using sine wave
+            // Rise = height of bump, Drop = net vertical change
+            ModuleShape.Bump => entryY + Drop * t - Rise * Mathf.Sin(t * Mathf.Pi),
 
             _ => entryY
         };
