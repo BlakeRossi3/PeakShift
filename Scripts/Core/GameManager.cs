@@ -140,6 +140,8 @@ public partial class GameManager : Node
 
     private void OnGameStarted()
     {
+        _player?.ResetForNewRun();
+        _terrainManager?.Reset();
         _runManager?.ResetRun();
         _biomeManager?.Reset();
 
