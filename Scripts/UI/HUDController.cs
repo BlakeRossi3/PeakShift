@@ -147,6 +147,21 @@ public partial class HUDController : CanvasLayer
                          $"\nPool: {TerrainRef.DebugPoolAvailable}/{TerrainRef.DebugPoolTotal}";
         }
 
+        string tuckInfo = "";
+        if (p.DebugIsTucking)
+        {
+            if (p.DebugIsAirborne)
+            {
+                tuckInfo = $"\nTuck: AERIAL DIVE (grav x{PhysicsConstants.TuckAerialGravityMultiplier:F1}, " +
+                    $"dive +{PhysicsConstants.TuckAerialDiveAcceleration:F0})";
+            }
+            else
+            {
+                tuckInfo = $"\nTuck: GROUNDED (launch x{PhysicsConstants.TuckLaunchThresholdMultiplier:F1}, " +
+                    $"snap +{PhysicsConstants.TuckExtraSnapDistance:F0}px)";
+            }
+        }
+
         _debugLabel.Text =
             $"Speed: {p.MomentumSpeed:F0} px/s\n" +
             $"Fwd Vel: {p.DebugForwardVelocity:F0} px/s\n" +
@@ -155,6 +170,7 @@ public partial class HUDController : CanvasLayer
             $"State: {airState}{gapState}\n" +
             $"Terrain: {p.DebugTerrainType}\n" +
             $"Vehicle: {p.CurrentVehicleType}" +
+            tuckInfo +
             clearanceInfo +
             moduleInfo;
     }

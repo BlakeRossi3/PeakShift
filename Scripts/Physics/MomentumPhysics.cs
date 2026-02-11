@@ -243,6 +243,96 @@ public static class MomentumPhysics
         return cap;
     }
 
+    // ── Tuck Aerial Dive ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Applies aerial tuck modifications to airborne velocity.
+    /// When tucking in air:
+    ///   1. Clamp upward velocity — prevents continued rise
+    ///   2. Apply extra downward acceleration (dive force)
+    ///   3. Scale gravity higher (faster descent)
+    ///   4. Clamp max downward velocity (prevent uncontrollable plummet)
+    ///
+    /// Returns the modified velocity after one frame of aerial tuck physics.
+    /// </summary>
+    public static Vector2 ApplyAerialTuck(Vector2 velocity, float dt)
+    {
+        // Clamp upward velocity — if player is still rising, kill most of the lift
+        if (velocity.Y < PhysicsConstants.TuckAerialMaxUpwardVelocity)
+            velocity.Y = PhysicsConstants.TuckAerialMaxUpwardVelocity;
+
+        // Apply dive acceleration (downward)
+        velocity.Y += PhysicsConstants.TuckAerialDiveAcceleration * dt;
+
+        // Clamp max downward velocity
+        if (velocity.Y > PhysicsConstants.TuckAerialMaxDownwardVelocity)
+            velocity.Y = PhysicsConstants.TuckAerialMaxDownwardVelocity;
+
+        return velocity;
+    }
+
+    /// <summary>
+    /// Integrates airborne physics with tuck dive applied.
+    /// Combines standard airborne integration with aerial tuck modifiers.
+    /// The gravity multiplier is scaled by TuckAerialGravityMultiplier.
+    /// </summary>
+    public static Vector2 IntegrateAirborneTucking(Vector2 velocity, float dt, float vehicleGravityMultiplier)
+    {
+        // Apply standard gravity with boosted multiplier
+        float effectiveGravMult = vehicleGravityMultiplier * PhysicsConstants.TuckAerialGravityMultiplier;
+        velocity = IntegrateAirborne(velocity, dt, effectiveGravMult);
+
+        // Apply aerial tuck dive on top
+        velocity = ApplyAerialTuck(velocity, dt);
+
+        return velocity;
+    }
+
+    // ── Tuck Grounded Downforce ────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the effective centripetal launch threshold multiplier when tucking.
+    /// The centripetal force must exceed gravity * this value to launch.
+    /// When tucking, this is much higher, preventing premature lift.
+    /// </summary>
+    public static float GetTuckLaunchThresholdScale(bool isTucking)
+    {
+        return isTucking
+            ? PhysicsConstants.LaunchCentripetalScale * PhysicsConstants.TuckLaunchThresholdMultiplier
+            : PhysicsConstants.LaunchCentripetalScale;
+    }
+
+    /// <summary>
+    /// Returns the effective ground snap distance, increased while tucking
+    /// to keep the player glued to the terrain over small bumps.
+    /// </summary>
+    public static float GetEffectiveSnapDistance(bool isTucking)
+    {
+        return isTucking
+            ? PhysicsConstants.GroundSnapDistance + PhysicsConstants.TuckExtraSnapDistance
+            : PhysicsConstants.GroundSnapDistance;
+    }
+
+    /// <summary>
+    /// Overloaded ShouldLaunchFromSurface that accepts a tuck state.
+    /// When tucking, the launch threshold is multiplied by TuckLaunchThresholdMultiplier,
+    /// making it much harder to accidentally detach from the surface.
+    /// </summary>
+    public static bool ShouldLaunchFromSurface(float speed, float curvature, float gravityMultiplier, bool isTucking)
+    {
+        if (curvature <= 0f)
+            return false;
+
+        if (speed < PhysicsConstants.MinLaunchSpeed)
+            return false;
+
+        float centripetalAccel = speed * speed * curvature;
+        float launchScale = GetTuckLaunchThresholdScale(isTucking);
+        float gravityThreshold = PhysicsConstants.Gravity * gravityMultiplier * launchScale;
+
+        return centripetalAccel > gravityThreshold;
+    }
+
     // ── Slope Utilities ─────────────────────────────────────────────
 
     /// <summary>
