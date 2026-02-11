@@ -1,6 +1,6 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=3 format=3 uid="uid://14yhu7hxkkn6"]
 
-[ext_resource type="Script" path="res://Scripts/Hazards/Avalanche.cs" id="1_aval"]
+[ext_resource type="Script" uid="uid://c25u3yauvuyfh" path="res://Scripts/Hazards/Avalanche.cs" id="1_aval"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_aval"]
 size = Vector2(200, 100)

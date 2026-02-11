@@ -1,17 +1,21 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=11 format=3 uid="uid://bc2x4s6dpqynm"]
 
-[ext_resource type="Script" path="res://Scripts/Core/GameManager.cs" id="1"]
-[ext_resource type="Script" path="res://Scripts/Core/RunManager.cs" id="2"]
-[ext_resource type="Script" path="res://Scripts/Terrain/TerrainManager.cs" id="4"]
-[ext_resource type="Script" path="res://Scripts/Audio/AudioManager.cs" id="5"]
-[ext_resource type="PackedScene" path="res://Scenes/Player/Player.tscn" id="6"]
-[ext_resource type="Script" path="res://Scripts/Core/BiomeManager.cs" id="7"]
+[ext_resource type="Script" uid="uid://cvl4teyb2n2tt" path="res://Scripts/Core/GameManager.cs" id="1"]
+[ext_resource type="Script" uid="uid://csfwwxx7mtaec" path="res://Scripts/Core/RunManager.cs" id="2"]
+[ext_resource type="Script" uid="uid://d0rhhbejc70mw" path="res://Scripts/Terrain/TerrainManager.cs" id="4"]
+[ext_resource type="Script" uid="uid://xx43kqu5c46j" path="res://Scripts/Audio/AudioManager.cs" id="5"]
+[ext_resource type="PackedScene" uid="uid://c1o3sa2du8noc" path="res://Scenes/Player/Player.tscn" id="6"]
+[ext_resource type="Script" uid="uid://b3fuq3y83legx" path="res://Scripts/Core/BiomeManager.cs" id="7"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/HUD.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/MainMenu.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/GameOver.tscn" id="10"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/PauseMenu.tscn" id="11"]
 
 [node name="Main" type="Node2D"]
+
+[node name="MainMenu" parent="." instance=ExtResource("9")]
+grow_horizontal = 2
+grow_vertical = 2
 
 [node name="GameManager" type="Node" parent="."]
 script = ExtResource("1")
@@ -27,30 +31,32 @@ script = ExtResource("7")
 
 [node name="Background" type="ColorRect" parent="."]
 z_index = -10
-anchors_preset = 15
 offset_left = -10000.0
 offset_top = -10000.0
 offset_right = 100000.0
 offset_bottom = 10000.0
+mouse_filter = 2
 color = Color(0.53, 0.72, 0.88, 1)
 
 [node name="Player" parent="." instance=ExtResource("6")]
-position = Vector2(100, 236)
+position = Vector2(100, 260)
 
 [node name="PlayerCamera" type="Camera2D" parent="Player"]
+zoom = Vector2(0.5, 0.5)
 position_smoothing_enabled = true
-position_smoothing_speed = 5.0
 
 [node name="TerrainManager" type="Node2D" parent="."]
 script = ExtResource("4")
-ChunksAhead = 5
 
 [node name="HUD" parent="." instance=ExtResource("8")]
-
-[node name="MainMenu" parent="." instance=ExtResource("9")]
+visible = false
 
 [node name="GameOver" parent="." instance=ExtResource("10")]
 visible = false
+grow_horizontal = 2
+grow_vertical = 2
 
 [node name="PauseMenu" parent="." instance=ExtResource("11")]
 visible = false
+grow_horizontal = 2
+grow_vertical = 2

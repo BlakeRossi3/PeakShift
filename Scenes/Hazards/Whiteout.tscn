@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=2 format=3 uid="uid://bt7llce40450k"]
 
-[ext_resource type="Script" path="res://Scripts/Hazards/Whiteout.cs" id="1_white"]
+[ext_resource type="Script" uid="uid://ble0mgsckwhsw" path="res://Scripts/Hazards/Whiteout.cs" id="1_white"]
 
 [node name="Whiteout" type="Area2D"]
 script = ExtResource("1_white")

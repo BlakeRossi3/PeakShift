@@ -10,13 +10,25 @@ public abstract partial class VehicleBase : Node2D
 {
     /// <summary>Base horizontal speed for this vehicle (pixels/s).</summary>
     [Export]
-    public float BaseSpeed { get; set; } = 300f;
+    public float BaseSpeed { get; set; } = 700f;
+
+    /// <summary>Maximum horizontal speed for this vehicle (pixels/s).</summary>
+    [Export]
+    public float MaxSpeed { get; set; } = 1000f;
 
     /// <summary>Base gravity value (pixels/s^2).</summary>
     [Export]
-    public float BaseGravity { get; set; } = 980f;
+    public float BaseGravity { get; set; } = 80f;
 
     // ── Abstract API ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the acceleration rate (pixels/s^2) for the given terrain type.
+    /// Positive = speed up, negative = slow down.
+    /// </summary>
+    /// <param name="terrain">The current terrain surface.</param>
+    /// <returns>Acceleration rate.</returns>
+    public abstract float GetAcceleration(TerrainType terrain);
 
     /// <summary>
     /// Returns the speed multiplier for the given terrain type.

@@ -1,7 +1,7 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=3 format=3 uid="uid://cgae67d7mm3al"]
 
-[ext_resource type="Script" path="res://Scripts/Vehicles/BikeController.cs" id="1"]
-[ext_resource type="Texture2D" path="res://Assets/Art/Vehicles/bike_placeholder.png" id="2"]
+[ext_resource type="Script" uid="uid://b0j4ra2lgbu31" path="res://Scripts/Vehicles/BikeController.cs" id="1"]
+[ext_resource type="Texture2D" uid="uid://d4fxh1lfbe2hi" path="res://Assets/Art/Vehicles/bike_placeholder.png" id="2"]
 
 [node name="Bike" type="Node2D"]
 script = ExtResource("1")

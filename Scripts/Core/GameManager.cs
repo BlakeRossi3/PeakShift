@@ -238,6 +238,12 @@ public partial class GameManager : Node
 					break;
 			}
 		}
+
+		// Quick restart with R key when game over
+		if (@event.IsActionPressed("restart") && CurrentState == GameState.GameOver)
+		{
+			StartGame();
+		}
 	}
 
 	// ── Public API ───────────────────────────────────────────────

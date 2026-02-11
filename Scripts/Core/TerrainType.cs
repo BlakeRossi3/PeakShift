@@ -12,8 +12,5 @@ public enum TerrainType
     Dirt,
 
     /// <summary>Icy, slippery surface.</summary>
-    Ice,
-
-    /// <summary>Wet, mixed snow-mud surface.</summary>
-    Slush
+    Ice
 }

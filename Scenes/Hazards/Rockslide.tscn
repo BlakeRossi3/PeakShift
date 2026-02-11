@@ -1,6 +1,6 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=3 format=3 uid="uid://d3nd3ut44sqen"]
 
-[ext_resource type="Script" path="res://Scripts/Hazards/Rockslide.cs" id="1_rock"]
+[ext_resource type="Script" uid="uid://b7twlhl632xbk" path="res://Scripts/Hazards/Rockslide.cs" id="1_rock"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_rock"]
 radius = 80.0
