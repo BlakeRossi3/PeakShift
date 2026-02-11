@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3 uid="uid://biome_manager"]
+
+[ext_resource type="Script" path="res://Scripts/Core/BiomeManager.cs" id="1"]
+
+[node name="BiomeManager" type="Node"]
+script = ExtResource("1")
+
+[node name="TransitionTimer" type="Timer" parent="."]
+wait_time = 2.0
+one_shot = true
