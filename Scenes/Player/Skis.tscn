@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3 uid="uid://bq5vq1u4ls22w"]
 
 [ext_resource type="Script" uid="uid://d38k4v0y8w3ei" path="res://Scripts/Vehicles/SkiController.cs" id="1"]
-[ext_resource type="Texture2D" uid="uid://kc8l1oqx0yuk" path="res://Assets/Art/Vehicles/skis_placeholder.png" id="2"]
+[ext_resource type="Texture2D" path="res://Assets/Art/Vehicles/skis_placeholder.png" id="2"]
 
 [node name="Skis" type="Node2D"]
 script = ExtResource("1")

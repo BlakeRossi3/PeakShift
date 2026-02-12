@@ -8,8 +8,10 @@ namespace PeakShift;
 /// default zoom on landing.
 ///
 /// Also applies a speed-based look-ahead offset so the player
-/// can see what's coming, and uses high smoothing speed so the
-/// camera keeps up at high velocities on steep terrain.
+/// can see what's coming.
+///
+/// Runs in _PhysicsProcess to stay synchronised with the player's
+/// CharacterBody2D movement and avoid high-speed visual lag.
 /// </summary>
 public partial class PlayerCamera : Camera2D
 {
@@ -44,6 +46,10 @@ public partial class PlayerCamera : Camera2D
 	[Export]
 	public float LookAheadSmoothing { get; set; } = 5f;
 
+	/// <summary>How quickly the camera follows the player position (higher = tighter).</summary>
+	[Export]
+	public float FollowSpeed { get; set; } = 18f;
+
 	private PlayerController _player;
 	private TerrainManager _terrain;
 	private float _currentZoom;
@@ -55,17 +61,32 @@ public partial class PlayerCamera : Camera2D
 		_player = GetParentOrNull<PlayerController>();
 		_terrain = GetNodeOrNull<TerrainManager>("../../TerrainManager");
 
-		// Use high smoothing speed so camera keeps up at high velocities.
-		// Default 5.0 causes severe lag on steep terrain.
-		PositionSmoothingSpeed = 20f;
+		// Disable Godot's built-in position smoothing — we handle it manually
+		// in _PhysicsProcess so it stays in sync with the player's physics.
+		PositionSmoothingEnabled = false;
+
+		// Detach from parent transform so we can position ourselves each frame
+		TopLevel = true;
+
+		// Start at player position
+		if (_player != null)
+			GlobalPosition = _player.GlobalPosition;
 	}
 
-	public override void _Process(double delta)
+	public override void _PhysicsProcess(double delta)
 	{
+		if (_player == null) return;
+
 		float dt = (float)delta;
+
+		// ── Follow player position ─────────────────────────────────
+		Vector2 targetPos = _player.GlobalPosition;
+		GlobalPosition = GlobalPosition.Lerp(targetPos, 1f - Mathf.Exp(-FollowSpeed * dt));
+
+		// ── Dynamic zoom ───────────────────────────────────────────
 		float targetZoom = DefaultZoom;
 
-		if (_player != null && _terrain != null)
+		if (_terrain != null)
 		{
 			float playerY = _player.GlobalPosition.Y;
 			float playerX = _player.GlobalPosition.X;
@@ -89,8 +110,8 @@ public partial class PlayerCamera : Camera2D
 		_currentZoom = Mathf.Lerp(_currentZoom, targetZoom, 1f - Mathf.Exp(-ZoomSpeed * dt));
 		Zoom = new Vector2(_currentZoom, _currentZoom);
 
-		// ── Speed-based look-ahead ──────────────────────────────────
-		float speed = _player?.MomentumSpeed ?? 0f;
+		// ── Speed-based look-ahead ─────────────────────────────────
+		float speed = _player.MomentumSpeed;
 		float targetLookAhead = Mathf.Min(speed / LookAheadSpeedRef, 1f) * MaxLookAhead;
 		_currentLookAhead = Mathf.Lerp(_currentLookAhead, targetLookAhead,
 			1f - Mathf.Exp(-LookAheadSmoothing * dt));

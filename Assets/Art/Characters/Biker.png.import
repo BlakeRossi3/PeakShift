@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://kc8l1oqx0yuk"
-path="res://.godot/imported/skis_placeholder.png-66217af4e5b7a2ef09ef3700cf9bc85f.ctex"
+uid="uid://c64gy12sdm4rg"
+path="res://.godot/imported/Biker.png-aab6be41155b3a5c05e584c04dae9421.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Art/Vehicles/skis_placeholder.png"
-dest_files=["res://.godot/imported/skis_placeholder.png-66217af4e5b7a2ef09ef3700cf9bc85f.ctex"]
+source_file="res://Assets/Art/Characters/Biker.png"
+dest_files=["res://.godot/imported/Biker.png-aab6be41155b3a5c05e584c04dae9421.ctex"]
 
 [params]
 

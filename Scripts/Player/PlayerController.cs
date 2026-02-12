@@ -80,6 +80,8 @@ public partial class PlayerController : CharacterBody2D
 	private GameManager _gameManager;
 	private TerrainManager _terrainManager;
 	private Sprite2D _playerSprite;
+	private Texture2D _bikerTexture;
+	private Texture2D _skierTexture;
 	private Vector2 _startPosition;
 
 	// Vehicle swap
@@ -109,6 +111,9 @@ public partial class PlayerController : CharacterBody2D
 
 	// Terrain-hugging: collision shape half-height for snap offset
 	private float _collisionHalfHeight = 32f;
+
+	// Slope-following visual rotation
+	private float _visualRotation;
 
 	// ── Jump clearance tracking ────────────────────────────────────
 	// Tracks whether we've evaluated the current gap so we only check once per gap.
@@ -145,6 +150,8 @@ public partial class PlayerController : CharacterBody2D
 		_gameManager = GetNodeOrNull<GameManager>("../GameManager");
 		_terrainManager = GetNodeOrNull<TerrainManager>("../TerrainManager");
 		_playerSprite = GetNodeOrNull<Sprite2D>("Sprite2D");
+		_bikerTexture = GD.Load<Texture2D>("res://Assets/Art/Characters/Biker.png");
+		_skierTexture = GD.Load<Texture2D>("res://Assets/Art/Characters/Skier.png");
 
 		// Configure CharacterBody2D for terrain hugging
 		FloorSnapLength = 48f;
@@ -408,6 +415,12 @@ public partial class PlayerController : CharacterBody2D
 			}
 		}
 
+		// ── Slope-following visual rotation ─────────────────────────
+		float targetAngle = Mathf.Atan2(tangent.Y, tangent.X); // angle of surface tangent
+		_visualRotation = Mathf.Lerp(_visualRotation, targetAngle, 1f - Mathf.Exp(-12f * dt));
+		if (_playerSprite != null)
+			_playerSprite.Rotation = _visualRotation;
+
 		MoveAndSlide();
 
 		// ── Post-move terrain hugging ───────────────────────────────
@@ -461,6 +474,13 @@ public partial class PlayerController : CharacterBody2D
 		}
 
 		Velocity = _airVelocity;
+
+		// ── Velocity-direction visual rotation ──────────────────────
+		float targetAngle = Mathf.Atan2(_airVelocity.Y, _airVelocity.X);
+		_visualRotation = Mathf.Lerp(_visualRotation, targetAngle, 1f - Mathf.Exp(-8f * dt));
+		if (_playerSprite != null)
+			_playerSprite.Rotation = _visualRotation;
+
 		MoveAndSlide();
 
 		// ── Landing detection ───────────────────────────────────────
@@ -583,9 +603,7 @@ public partial class PlayerController : CharacterBody2D
 		// Update visual tuck state
 		SetSkiTucking(landIntoTuck);
 
-		// Reset sprite rotation
-		if (_playerSprite != null)
-			_playerSprite.Rotation = 0f;
+		// _visualRotation will be smoothly updated by ProcessGrounded next frame
 	}
 
 	private void OnFlipLanding()
@@ -628,6 +646,8 @@ public partial class PlayerController : CharacterBody2D
 		_flipCount = 0;
 		_airVelocity = Vector2.Zero;
 
+		// Reset visual rotation — ProcessGrounded will smoothly lerp to slope angle
+		_visualRotation = 0f;
 		if (_playerSprite != null)
 			_playerSprite.Rotation = 0f;
 
@@ -686,6 +706,7 @@ public partial class PlayerController : CharacterBody2D
 		}
 
 		CurrentVehicle?.OnActivated();
+		UpdateCharacterSprite();
 
 		_canSwap = false;
 		_swapTimer = PhysicsConstants.SwapCooldown;
@@ -719,6 +740,7 @@ public partial class PlayerController : CharacterBody2D
 		CurrentVehicle?.OnDeactivated();
 		CurrentVehicle = BikeNode;
 		CurrentVehicle?.OnActivated();
+		UpdateCharacterSprite();
 
 		_canSwap = true;
 		_swapTimer = 0f;
@@ -738,6 +760,7 @@ public partial class PlayerController : CharacterBody2D
 		_tuckInputHeld = false;
 		SetSkiTucking(false);
 
+		_visualRotation = 0f;
 		if (_playerSprite != null) _playerSprite.Rotation = 0f;
 
 		CurrentTerrain = TerrainType.Snow;
@@ -856,6 +879,7 @@ public partial class PlayerController : CharacterBody2D
 	private void OnCrash(string reason)
 	{
 		// Reset visual state
+		_visualRotation = 0f;
 		if (_playerSprite != null) _playerSprite.Rotation = 0f;
 		_flipRotation = 0f;
 		_flipAngularVelocity = 0f;
@@ -872,6 +896,12 @@ public partial class PlayerController : CharacterBody2D
 	}
 
 	// ── Helper Methods ──────────────────────────────────────────────
+
+	private void UpdateCharacterSprite()
+	{
+		if (_playerSprite != null)
+			_playerSprite.Texture = CurrentVehicleType == VehicleType.Bike ? _bikerTexture : _skierTexture;
+	}
 
 	/// <summary>Sets the ski tucking visual state if SkiNode exists.</summary>
 	private void SetSkiTucking(bool value)

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d4fxh1lfbe2hi"
-path="res://.godot/imported/bike_placeholder.png-c4e2ab1da370cb619bd94da061296783.ctex"
+uid="uid://6qfkk1v3pt1p"
+path="res://.godot/imported/Skier.png-70d1c9bf261d055ef8aada565c417bc8.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Art/Vehicles/bike_placeholder.png"
-dest_files=["res://.godot/imported/bike_placeholder.png-c4e2ab1da370cb619bd94da061296783.ctex"]
+source_file="res://Assets/Art/Characters/Skier.png"
+dest_files=["res://.godot/imported/Skier.png-70d1c9bf261d055ef8aada565c417bc8.ctex"]
 
 [params]
 
