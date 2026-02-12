@@ -4,18 +4,18 @@ using Godot;
 namespace PeakShift.Terrain;
 
 /// <summary>
-/// Core track generation engine. Replaces the old ad-hoc TerrainManager generation
-/// with modular prefab-based track pieces from a ModuleCatalog.
+/// Core track generation engine using procedural wave-based terrain generation.
 ///
 /// Architecture:
-///   1. ModuleCatalog provides the library of available TrackModule definitions.
-///   2. DifficultyProfile controls how constraints tighten over distance.
-///   3. This generator picks modules via weighted random selection with constraints:
-///      - Terrain alternation (max N same-type in a row, forced transitions)
-///      - Difficulty gating (harder modules unlock with distance)
-///      - Jump spacing (not every module is a jump, but jumps are clear-or-die)
-///   4. ModulePool recycles StaticBody2D nodes for efficiency.
-///   5. Placed modules are tracked as PlacedModule instances for height queries.
+///   1. ProceduralModuleFactory generates descent/ramp/flat/bump modules on the fly
+///      with parameters derived from the guidance slope angle.
+///   2. ModuleCatalog provides transition modules for terrain type changes.
+///   3. DifficultyProfile controls guidance slope, variety chances, and scaling.
+///   4. Wave-based generation: each wave = Descent → (optional variety) → Ramp+Gap.
+///      Variety is injected via descent flavors, flat breathers, bump rollers,
+///      double-descents, and ramp skips.
+///   5. Dynamic gap sizing: gap width is computed from the preceding descent's
+///      geometry, creating a Tiny Wings-style relationship.
 ///
 /// The generator maintains a sequence of placed modules that the TerrainManager
 /// can query for height, normals, gap info, and terrain type at any world X.
@@ -59,9 +59,6 @@ public class ModuleTrackGenerator
             float t = (worldX - WorldStartX) / Length;
             return Template.SampleHeight(t, EntryY);
         }
-
-        /// <summary>True if this module is a gap (airborne section).</summary>
-        public bool IsGapModule => Template.Shape == TrackModule.ModuleShape.Gap;
     }
 
     // ── Configuration ────────────────────────────────────────────
@@ -69,6 +66,7 @@ public class ModuleTrackGenerator
     private readonly ModuleCatalog _catalog;
     private readonly DifficultyProfile _difficulty;
     private readonly RandomNumberGenerator _rng = new();
+    private readonly ProceduralModuleFactory _factory;
 
     /// <summary>How many modules ahead of the player to keep generated.</summary>
     public int LookaheadModules { get; set; } = 8;
@@ -84,7 +82,9 @@ public class ModuleTrackGenerator
     private const float IntroRampRise = 350f;
     private const float IntroGapWidth = 250f;
 
-    // ── State ────────────────────────────────────────────────────
+    // ── Wave generation state ────────────────────────────────────
+
+    private enum WavePhase { Descent, VarietyInjection, Ramp, PostGap }
 
     private readonly List<PlacedModule> _placed = new();
     private float _nextModuleX;
@@ -94,7 +94,11 @@ public class ModuleTrackGenerator
     private TerrainType _currentTerrain = TerrainType.Snow;
     private int _modulesSinceLastJump;
     private float _totalDistance;
-    private bool _introPlaced;
+
+    // Wave phase tracking
+    private WavePhase _currentPhase = WavePhase.Descent;
+    private float _lastDescentDrop;
+    private float _lastDescentLength;
 
     /// <summary>All currently placed modules (read-only).</summary>
     public IReadOnlyList<PlacedModule> PlacedModules => _placed;
@@ -112,6 +116,7 @@ public class ModuleTrackGenerator
         _catalog = catalog;
         _difficulty = difficulty;
         _rng.Randomize();
+        _factory = new ProceduralModuleFactory(difficulty, _rng);
     }
 
     // ── Public API ───────────────────────────────────────────────
@@ -130,7 +135,9 @@ public class ModuleTrackGenerator
         _currentTerrain = TerrainType.Snow;
         _modulesSinceLastJump = 0;
         _totalDistance = 0f;
-        _introPlaced = false;
+        _currentPhase = WavePhase.Descent;
+        _lastDescentDrop = 0f;
+        _lastDescentLength = 0f;
 
         // Place the intro sequence
         PlaceIntroSequence();
@@ -233,7 +240,6 @@ public class ModuleTrackGenerator
 
     /// <summary>
     /// Preview mode: generate N modules from current state without side effects.
-    /// Returns the list of placed modules for inspection.
     /// </summary>
     public List<PlacedModule> PreviewGenerate(int count)
     {
@@ -246,6 +252,9 @@ public class ModuleTrackGenerator
         int savedJump = _modulesSinceLastJump;
         float savedDist = _totalDistance;
         int savedCount = _placed.Count;
+        var savedPhase = _currentPhase;
+        float savedLastDrop = _lastDescentDrop;
+        float savedLastLength = _lastDescentLength;
 
         // Generate preview modules
         var preview = new List<PlacedModule>();
@@ -255,7 +264,7 @@ public class ModuleTrackGenerator
             preview.Add(_placed[^1]);
         }
 
-        // Restore state: remove preview modules
+        // Restore state
         while (_placed.Count > savedCount)
             _placed.RemoveAt(_placed.Count - 1);
 
@@ -266,6 +275,9 @@ public class ModuleTrackGenerator
         _currentTerrain = savedTerrain;
         _modulesSinceLastJump = savedJump;
         _totalDistance = savedDist;
+        _currentPhase = savedPhase;
+        _lastDescentDrop = savedLastDrop;
+        _lastDescentLength = savedLastLength;
 
         return preview;
     }
@@ -300,6 +312,10 @@ public class ModuleTrackGenerator
         };
         PlaceModule(introDescent);
 
+        // Stash intro descent stats for the first ramp
+        _lastDescentDrop = IntroDescentDrop;
+        _lastDescentLength = IntroDescentLength;
+
         // Intro ramp with jump
         var introRamp = new TrackModule
         {
@@ -314,68 +330,150 @@ public class ModuleTrackGenerator
         };
         PlaceModule(introRamp);
 
-        _introPlaced = true;
         _sameTerrainCount = 2;
+        _currentPhase = WavePhase.PostGap;
     }
 
-    // ── Internal: module generation ──────────────────────────────
+    // ── Internal: wave-based module generation ───────────────────
 
     private void GenerateNextModule()
     {
-        int maxDiff = _difficulty.GetMaxDifficulty(_totalDistance);
         int maxSameRun = _difficulty.GetMaxSameTerrainRun(_totalDistance);
-
         bool mustSwitch = _sameTerrainCount >= maxSameRun;
-        bool shouldJump = _modulesSinceLastJump >= 2;  // At least one jump every ~3 modules
 
-        TrackModule selected;
+        // Terrain transition takes priority — insert between waves
+        if (mustSwitch && (_currentPhase == WavePhase.Descent || _currentPhase == WavePhase.PostGap))
+        {
+            int maxDiff = _difficulty.GetMaxDifficulty(_totalDistance);
+            PlaceModule(SelectTransitionModule(maxDiff));
+            _currentPhase = WavePhase.Descent;
+            return;
+        }
 
-        // If both jump and switch are needed, prioritize jump every other time
-        if (mustSwitch && shouldJump && _modulesSinceLastJump >= 3)
+        switch (_currentPhase)
         {
-            // Really need a jump - try to get a transition with jump
-            selected = SelectTransitionJumpModule(maxDiff);
+            case WavePhase.Descent:
+                GenerateDescentPhase();
+                break;
+            case WavePhase.VarietyInjection:
+                GenerateVarietyPhase();
+                break;
+            case WavePhase.Ramp:
+                GenerateRampPhase();
+                break;
+            case WavePhase.PostGap:
+                _currentPhase = WavePhase.Descent;
+                GenerateDescentPhase();
+                break;
         }
-        else if (mustSwitch)
+    }
+
+    private void GenerateDescentPhase()
+    {
+        string flavor = PickDescentFlavor();
+        var descent = _factory.GenerateDescent(_totalDistance, _currentTerrain, flavor);
+        PlaceModule(descent);
+
+        _lastDescentDrop = descent.Drop;
+        _lastDescentLength = descent.Length;
+
+        // Decide next phase
+        float roll = _rng.Randf();
+
+        // Double descent? (two descents in a row)
+        if (roll < _difficulty.DoubleDescentChance)
         {
-            // Must place a transition piece
-            selected = SelectTransitionModule(maxDiff);
+            _currentPhase = WavePhase.Descent;
+            return;
         }
-        else if (shouldJump)
+        roll -= _difficulty.DoubleDescentChance;
+
+        // Skip ramp entirely? (descent flows into next descent)
+        if (roll < _difficulty.SkipRampChance)
         {
-            // Try to place a ramp with jump
-            selected = SelectJumpModule(maxDiff);
+            _currentPhase = WavePhase.Descent;
+            return;
+        }
+        roll -= _difficulty.SkipRampChance;
+
+        // Insert a variety piece before the ramp?
+        float varietyTotal = _difficulty.FlatBreatherChance + _difficulty.BumpRollerChance;
+        if (roll < varietyTotal)
+        {
+            _currentPhase = WavePhase.VarietyInjection;
         }
         else
         {
-            // Normal selection: descent, flat, bump, or ramp-no-jump
-            selected = SelectNormalModule(maxDiff);
+            _currentPhase = WavePhase.Ramp;
+        }
+    }
+
+    private void GenerateVarietyPhase()
+    {
+        float flatChance = _difficulty.FlatBreatherChance;
+        float bumpChance = _difficulty.BumpRollerChance;
+        float total = flatChance + bumpChance;
+
+        float roll = _rng.Randf() * total;
+
+        if (roll < flatChance)
+        {
+            PlaceModule(_factory.GenerateFlat(_totalDistance, _currentTerrain));
+        }
+        else
+        {
+            PlaceModule(_factory.GenerateBump(_totalDistance, _currentTerrain));
         }
 
-        PlaceModule(selected);
+        _currentPhase = WavePhase.Ramp;
     }
 
-    private TrackModule SelectTransitionJumpModule(int maxDiff)
+    private void GenerateRampPhase()
     {
-        // Try to find a transition module with a jump
-        var targets = new List<TerrainType>();
-        if (_currentTerrain != TerrainType.Snow) targets.Add(TerrainType.Snow);
-        if (_currentTerrain != TerrainType.Dirt) targets.Add(TerrainType.Dirt);
-        if (_currentTerrain != TerrainType.Ice && maxDiff >= 2) targets.Add(TerrainType.Ice);
+        // Decide if this ramp has a jump
+        bool shouldJump = _modulesSinceLastJump >= 2;
+        bool withJump = shouldJump || _rng.Randf() < 0.4f;
 
-        var targetTerrain = targets[_rng.RandiRange(0, targets.Count - 1)];
+        var ramp = _factory.GenerateRamp(
+            _lastDescentDrop, _lastDescentLength,
+            _totalDistance, _currentTerrain, withJump
+        );
+        PlaceModule(ramp);
 
-        var candidates = _catalog.QueryTransitions(_currentTerrain, targetTerrain);
-        candidates.RemoveAll(m => m.Difficulty > maxDiff || m.MinDistance > _totalDistance);
-
-        // Prefer transition modules with jumps
-        var jumpTransitions = candidates.FindAll(m => m.HasJump);
-        if (jumpTransitions.Count > 0)
-            return WeightedSelect(jumpTransitions);
-
-        // Fallback to regular transition
-        return SelectTransitionModule(maxDiff);
+        _currentPhase = withJump ? WavePhase.PostGap : WavePhase.Descent;
     }
+
+    private string PickDescentFlavor()
+    {
+        float normalWeight = 1.0f;
+        float shortSteepWeight = 0.2f;
+        float longGentleWeight = 0.2f;
+        float cruiseWeight = 0.15f;
+
+        // At higher difficulty, increase variety weights
+        int maxDiff = _difficulty.GetMaxDifficulty(_totalDistance);
+        if (maxDiff >= 3)
+        {
+            shortSteepWeight = 0.35f;
+            longGentleWeight = 0.3f;
+        }
+        if (maxDiff >= 4)
+        {
+            shortSteepWeight = 0.4f;
+        }
+
+        float total = normalWeight + shortSteepWeight + longGentleWeight + cruiseWeight;
+        float roll = _rng.Randf() * total;
+
+        if (roll < normalWeight) return "normal";
+        roll -= normalWeight;
+        if (roll < shortSteepWeight) return "short_steep";
+        roll -= shortSteepWeight;
+        if (roll < longGentleWeight) return "long_gentle";
+        return "cruise";
+    }
+
+    // ── Internal: transition module selection ────────────────────
 
     private TrackModule SelectTransitionModule(int maxDiff)
     {
@@ -388,9 +486,15 @@ public class ModuleTrackGenerator
         var targetTerrain = targets[_rng.RandiRange(0, targets.Count - 1)];
 
         var candidates = _catalog.QueryTransitions(_currentTerrain, targetTerrain);
-
-        // Filter by difficulty
         candidates.RemoveAll(m => m.Difficulty > maxDiff || m.MinDistance > _totalDistance);
+
+        // If a jump is overdue, prefer transition modules with jumps
+        if (_modulesSinceLastJump >= 3)
+        {
+            var jumpTransitions = candidates.FindAll(m => m.HasJump);
+            if (jumpTransitions.Count > 0)
+                return WeightedSelect(jumpTransitions);
+        }
 
         if (candidates.Count > 0)
             return WeightedSelect(candidates);
@@ -403,58 +507,6 @@ public class ModuleTrackGenerator
             ExitTerrain = targetTerrain,
             Length = 500f,
             Drop = 180f,
-            Difficulty = 1
-        };
-    }
-
-    private TrackModule SelectJumpModule(int maxDiff)
-    {
-        var candidates = _catalog.Query(
-            terrainFilter: _currentTerrain,
-            maxDifficulty: maxDiff,
-            currentDistance: _totalDistance,
-            allowJumps: true,
-            requireTransition: false
-        );
-
-        // Prefer modules with jumps
-        var jumpCandidates = candidates.FindAll(m => m.HasJump);
-        if (jumpCandidates.Count > 0)
-            return WeightedSelect(jumpCandidates);
-
-        // Fallback to any candidate
-        if (candidates.Count > 0)
-            return WeightedSelect(candidates);
-
-        // Emergency fallback
-        return CreateFallbackDescent();
-    }
-
-    private TrackModule SelectNormalModule(int maxDiff)
-    {
-        var candidates = _catalog.Query(
-            terrainFilter: _currentTerrain,
-            maxDifficulty: maxDiff,
-            currentDistance: _totalDistance,
-            allowJumps: true,
-            requireTransition: false
-        );
-
-        if (candidates.Count > 0)
-            return WeightedSelect(candidates);
-
-        return CreateFallbackDescent();
-    }
-
-    private TrackModule CreateFallbackDescent()
-    {
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Descent,
-            EntryTerrain = _currentTerrain,
-            ExitTerrain = _currentTerrain,
-            Length = 1500f,
-            Drop = 600f,
             Difficulty = 1
         };
     }
@@ -505,14 +557,16 @@ public class ModuleTrackGenerator
             HasJump = template.HasJump,
             GapWidth = scaledGapWidth,
             Weight = template.Weight,
-            MinDistance = template.MinDistance
+            MinDistance = template.MinDistance,
+            ObstacleDensity = template.ObstacleDensity,
+            AllowedObstacleTypes = template.AllowedObstacleTypes
         };
 
         float exitY = scaledTemplate.ComputeExitY(_nextModuleY);
         float gapEndX = _nextModuleX + scaledTemplate.Length + scaledGapWidth;
 
         // Landing offset after gap (slight drop for natural feel)
-        float landingOffset = template.HasJump ? _rng.RandfRange(30f, 80f) : 0f;
+        float landingOffset = scaledTemplate.HasJump ? _rng.RandfRange(30f, 80f) : 0f;
 
         var placed = new PlacedModule
         {

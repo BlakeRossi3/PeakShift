@@ -19,7 +19,7 @@ public partial class PlayerCamera : Camera2D
 
 	/// <summary>Never zoom out further than this.</summary>
 	[Export]
-	public float MinZoom { get; set; } = 0.18f;
+	public float MinZoom { get; set; } = 0.12f;
 
 	/// <summary>Extra pixels of padding below the terrain surface.</summary>
 	[Export]
@@ -65,14 +65,16 @@ public partial class PlayerCamera : Camera2D
 		float dt = (float)delta;
 		float targetZoom = DefaultZoom;
 
-		bool airborne = _player != null
-			&& (_player.CurrentMoveState == PlayerController.MoveState.Airborne
-			    || _player.CurrentMoveState == PlayerController.MoveState.Flipping);
-
-		if (airborne && _terrain != null)
+		if (_player != null && _terrain != null)
 		{
 			float playerY = _player.GlobalPosition.Y;
-			float terrainY = _terrain.GetTerrainHeight(_player.GlobalPosition.X);
+			float playerX = _player.GlobalPosition.X;
+
+			// Check terrain height directly below and slightly ahead
+			float terrainBelow = _terrain.GetTerrainHeight(playerX);
+			float terrainAhead = _terrain.GetTerrainHeight(playerX + 300f);
+			float terrainY = Mathf.Max(terrainBelow, terrainAhead);
+
 			float gap = terrainY - playerY + BottomMargin;
 
 			if (gap > 0f)

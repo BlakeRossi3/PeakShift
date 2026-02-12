@@ -80,13 +80,6 @@ public partial class TrackModule : Resource
     [Export]
     public float GapWidth { get; set; } = 200f;
 
-    /// <summary>
-    /// Required clearance metric: minimum speed (px/s) needed to clear the gap.
-    /// Used for difficulty display and validation. 0 = auto-calculated.
-    /// </summary>
-    [Export]
-    public float RequiredClearanceSpeed { get; set; } = 0f;
-
     // ── Selection weight ─────────────────────────────────────────
 
     /// <summary>
@@ -95,6 +88,23 @@ public partial class TrackModule : Resource
     /// </summary>
     [Export]
     public float Weight { get; set; } = 1.0f;
+
+    // ── Obstacle metadata ────────────────────────────────────────
+
+    /// <summary>
+    /// Obstacle density: 0 = no obstacles, 1 = maximum obstacles.
+    /// Used by the terrain generator to determine how many obstacles to spawn.
+    /// </summary>
+    [Export(PropertyHint.Range, "0,1,0.1")]
+    public float ObstacleDensity { get; set; } = 0.0f;
+
+    /// <summary>
+    /// Types of obstacles allowed in this module.
+    /// Options: "Rock", "Tree", "Log"
+    /// Empty list = all types allowed (if ObstacleDensity > 0)
+    /// </summary>
+    [Export]
+    public string[] AllowedObstacleTypes { get; set; } = System.Array.Empty<string>();
 
     // ── Connector transforms ─────────────────────────────────────
     // These are computed at spawn time based on placement context.

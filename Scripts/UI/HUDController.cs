@@ -21,6 +21,11 @@ public partial class HUDController : CanvasLayer
     private Label _debugLabel;
     private bool _debugVisible;
 
+    // ── Flip points display ─────────────────────────────────────
+    private Label _flipPointsLabel;
+    private float _flipPointsTimer;
+    private const float FlipPointsDisplayDuration = 2.0f;
+
     /// <summary>
     /// Reference to the player controller, set by GameManager.
     /// When set, the debug overlay pulls live physics state each frame.
@@ -61,6 +66,17 @@ public partial class HUDController : CanvasLayer
         _debugLabel.AddThemeFontSizeOverride("font_size", 14);
         AddChild(_debugLabel);
 
+        // Create flip points label (center screen, large, bold, gold color)
+        _flipPointsLabel = new Label
+        {
+            Visible = false,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _flipPointsLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.84f, 0.0f)); // Gold
+        _flipPointsLabel.AddThemeFontSizeOverride("font_size", 72);
+        AddChild(_flipPointsLabel);
+
         GD.Print("[HUD] Initialized - found labels and buttons (debug overlay: F3)");
     }
 
@@ -75,6 +91,34 @@ public partial class HUDController : CanvasLayer
         else if (_swapButton != null)
         {
             _swapButton.Modulate = Colors.White;
+        }
+
+        // Update flip points display
+        if (_flipPointsTimer > 0)
+        {
+            _flipPointsTimer -= (float)delta;
+
+            // Position label at center of viewport
+            if (_flipPointsLabel != null)
+            {
+                var viewportSize = GetViewport().GetVisibleRect().Size;
+                _flipPointsLabel.Position = new Vector2(
+                    viewportSize.X / 2 - 100, // Offset for approximate text width
+                    viewportSize.Y / 2 - 100
+                );
+
+                // Fade out in last 0.5 seconds
+                if (_flipPointsTimer < 0.5f)
+                {
+                    float alpha = _flipPointsTimer / 0.5f;
+                    _flipPointsLabel.Modulate = new Color(1, 1, 1, alpha);
+                }
+            }
+
+            if (_flipPointsTimer <= 0)
+            {
+                _flipPointsLabel.Visible = false;
+            }
         }
 
         // Update debug overlay
@@ -114,13 +158,17 @@ public partial class HUDController : CanvasLayer
         _vehicleIcon.Texture = GD.Load<Texture2D>(path);
     }
 
-    public void UpdateTerrainPreview(Color[] colors)
+    public void ShowFlipPoints(int points, int flipCount)
     {
-        for (int i = 0; i < Mathf.Min(colors.Length, _terrainPreview.Length); i++)
-        {
-            if (_terrainPreview[i] != null)
-                _terrainPreview[i].Color = colors[i];
-        }
+        if (_flipPointsLabel == null) return;
+
+        string flipText = flipCount == 1 ? "FLIP" : $"{flipCount}X FLIP";
+        _flipPointsLabel.Text = $"+{points}\n{flipText}";
+        _flipPointsLabel.Visible = true;
+        _flipPointsLabel.Modulate = Colors.White; // Reset opacity
+        _flipPointsTimer = FlipPointsDisplayDuration;
+
+        GD.Print($"[HUD] Showing flip points: +{points} ({flipCount} flip(s))");
     }
 
     private void UpdateDebugOverlay()

@@ -45,9 +45,6 @@ public partial class PlayerController : CharacterBody2D
 	public delegate void VehicleSwappedEventHandler(int newState);
 
 	[Signal]
-	public delegate void PerfectSwapEventHandler();
-
-	[Signal]
 	public delegate void PlayerCrashedEventHandler();
 
 	[Signal]
@@ -57,7 +54,7 @@ public partial class PlayerController : CharacterBody2D
 	public delegate void FlipFailedEventHandler();
 
 	[Signal]
-	public delegate void SpeedChangedEventHandler(float speed);
+	public delegate void FlipPointsScoredEventHandler(int points, int flipCount);
 
 	// ── Node References ─────────────────────────────────────────────
 
@@ -101,15 +98,14 @@ public partial class PlayerController : CharacterBody2D
 	private float _flipRotation;
 	private float _flipAngularVelocity;
 	private bool _flipCompleted;
+	private bool _flipInputHeld;
+	private int _flipCount; // Number of full 360° rotations completed
 
 	// Post-flip bonus window
 	private float _flipBonusTimer;
 
 	// Tuck state
 	private bool _tuckInputHeld;
-
-	// Brake state (bike only)
-	private bool _brakeInputHeld;
 
 	// Terrain-hugging: collision shape half-height for snap offset
 	private float _collisionHalfHeight = 32f;
@@ -181,18 +177,39 @@ public partial class PlayerController : CharacterBody2D
 		if (_gameManager == null || _gameManager.CurrentState != GameManager.GameState.Playing)
 			return;
 
-		// ── Flip input (airborne only) ──────────────────────────────
+		// ── Flip input (ground or airborne) ────────────────────────
 		if (@event.IsActionPressed("jump"))
 		{
-			if (CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking)
+			// Allow flipping from ground or air
+			if (CurrentMoveState is MoveState.Grounded or MoveState.Tucking)
+			{
+				// Launch from ground into flip
+				TransitionToAirborne();
+				EnterFlipping();
+			}
+			else if (CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking)
 			{
 				// Exit aerial tuck to flip
 				if (CurrentMoveState == MoveState.AirborneTucking)
 				{
 					_tuckInputHeld = false;
-					if (SkiNode != null) SkiNode.IsTucking = false;
+					SetSkiTucking(false);
 				}
 				EnterFlipping();
+			}
+			// If already flipping, start rotating again
+			else if (CurrentMoveState == MoveState.Flipping)
+			{
+				_flipInputHeld = true;
+			}
+		}
+
+		// Stop rotation when space is released during flip
+		if (@event.IsActionReleased("jump"))
+		{
+			if (CurrentMoveState == MoveState.Flipping)
+			{
+				_flipInputHeld = false;
 			}
 		}
 
@@ -204,16 +221,6 @@ public partial class PlayerController : CharacterBody2D
 		if (@event.IsActionReleased("tuck"))
 		{
 			_tuckInputHeld = false;
-		}
-
-		// ── Brake input (bike only) ─────────────────────────────────
-		if (@event.IsActionPressed("brake"))
-		{
-			_brakeInputHeld = true;
-		}
-		if (@event.IsActionReleased("brake"))
-		{
-			_brakeInputHeld = false;
 		}
 
 		// ── Vehicle swap ────────────────────────────────────────────
@@ -319,10 +326,10 @@ public partial class PlayerController : CharacterBody2D
 		float terrainFriction = MomentumPhysics.GetTerrainFriction(CurrentTerrain);
 		float terrainDragMod = MomentumPhysics.GetTerrainDragModifier(CurrentTerrain);
 
-		float vehicleDragMod = CurrentVehicle?.DragModifier ?? 1.0f;
-		float vehicleFrictionMod = CurrentVehicle?.GetTerrainFrictionModifier(CurrentTerrain) ?? 1.0f;
-		float vehicleDragTerrainMod = CurrentVehicle?.GetTerrainDragModifier(CurrentTerrain) ?? 1.0f;
-		float vehicleTerrainBonus = CurrentVehicle?.GetTerrainBonus(CurrentTerrain) ?? 0f;
+		float vehicleDragMod = CurrentVehicle.DragModifier;
+		float vehicleFrictionMod = CurrentVehicle.GetTerrainFrictionModifier(CurrentTerrain);
+		float vehicleDragTerrainMod = CurrentVehicle.GetTerrainDragModifier(CurrentTerrain);
+		float vehicleTerrainBonus = CurrentVehicle.GetTerrainBonus(CurrentTerrain);
 
 		// ── Compute effective coefficients ──────────────────────────
 		float effectiveDrag = MomentumPhysics.GetEffectiveDragCoefficient(
@@ -334,11 +341,6 @@ public partial class PlayerController : CharacterBody2D
 		// Apply post-flip bonus drag reduction
 		if (_flipBonusTimer > 0f)
 			effectiveDrag *= PhysicsConstants.FlipSuccessDragMultiplier;
-
-		// ── Brake (bike only) ───────────────────────────────────────
-		bool isBraking = _brakeInputHeld && CurrentVehicleType == VehicleType.Bike;
-		if (isBraking)
-			effectiveDrag *= PhysicsConstants.BrakeDragMultiplier;
 
 		// ── Tuck downhill acceleration bonus ────────────────────────
 		float tuckAccelBonus = 1.0f;
@@ -360,10 +362,6 @@ public partial class PlayerController : CharacterBody2D
 
 		// ── Integrate speed ─────────────────────────────────────────
 		MomentumSpeed = MomentumPhysics.IntegrateSpeed(MomentumSpeed, acceleration, dt, terminalVel);
-
-		// ── Brake minimum speed ─────────────────────────────────────
-		if (isBraking && MomentumSpeed < PhysicsConstants.BrakeMinSpeed)
-			MomentumSpeed = PhysicsConstants.BrakeMinSpeed;
 
 		// ── Build velocity vector along surface ─────────────────────
 		// MomentumSpeed is treated as horizontal speed. Vertical component
@@ -403,11 +401,9 @@ public partial class PlayerController : CharacterBody2D
 
 			if (MomentumPhysics.ShouldLaunchFromSurface(MomentumSpeed, curvature, gravMult, isTucking))
 			{
-				// Disable floor snap for this launch
-				FloorSnapLength = 0f;
+				// TransitionToAirborne handles disabling floor snap
 				TransitionToAirborne();
 				MoveAndSlide();
-				FloorSnapLength = 48f;
 				return;
 			}
 		}
@@ -480,21 +476,34 @@ public partial class PlayerController : CharacterBody2D
 	{
 		float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
 
-		// ── Airborne trajectory continues during flip ───────────────
-		_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, gravMult);
+		// ── Airborne trajectory with reduced gravity during flip ────
+		// Apply flip gravity multiplier for floatier, more controllable flips
+		float flipGravMult = gravMult * PhysicsConstants.FlipGravityMultiplier;
+		_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, flipGravMult);
 		Velocity = _airVelocity;
 
-		// ── Integrate rotation ──────────────────────────────────────
-		_flipRotation = MomentumPhysics.IntegrateFlipRotation(_flipRotation, _flipAngularVelocity, dt);
+		// ── Integrate rotation (only while holding space) ───────────
+		float previousRotation = _flipRotation;
+
+		if (_flipInputHeld)
+		{
+			_flipRotation = MomentumPhysics.IntegrateFlipRotation(_flipRotation, _flipAngularVelocity, dt);
+		}
+		// else: rotation frozen at current angle
 
 		// Apply visual rotation
 		if (_playerSprite != null)
 			_playerSprite.Rotation = _flipRotation;
 
-		// Check if flip completed full rotation
-		if (!_flipCompleted && MomentumPhysics.IsFlipComplete(_flipRotation))
+		// Track number of full 360° rotations completed
+		int previousFlipCount = _flipCount;
+		_flipCount = (int)(Mathf.Abs(_flipRotation) / Mathf.Tau);
+
+		// Check if we just completed a new flip
+		if (_flipCount > previousFlipCount)
 		{
 			_flipCompleted = true;
+			GD.Print($"[PlayerController] Flip #{_flipCount} completed!");
 		}
 
 		MoveAndSlide();
@@ -514,6 +523,9 @@ public partial class PlayerController : CharacterBody2D
 		bool wasTucking = _tuckInputHeld;
 		CurrentMoveState = wasTucking ? MoveState.AirborneTucking : MoveState.Airborne;
 
+		// Disable floor snap while airborne to prevent premature re-attachment to terrain
+		FloorSnapLength = 0f;
+
 		// Use current velocity as air velocity
 		_airVelocity = Velocity;
 
@@ -527,7 +539,7 @@ public partial class PlayerController : CharacterBody2D
 		}
 
 		// Update visual tuck state
-		if (SkiNode != null) SkiNode.IsTucking = wasTucking;
+		SetSkiTucking(wasTucking);
 
 		// ── Jump clearance check ───────────────────────────────────
 		// When launching over a gap, predict trajectory and fail immediately
@@ -543,6 +555,8 @@ public partial class PlayerController : CharacterBody2D
 		CurrentMoveState = MoveState.Flipping;
 		_flipRotation = 0f;
 		_flipCompleted = false;
+		_flipInputHeld = true; // Start with input held
+		_flipCount = 0; // Reset flip counter
 
 		float flipMod = CurrentVehicle?.FlipSpeedModifier ?? 1.0f;
 		_flipAngularVelocity = MomentumPhysics.ComputeFlipAngularVelocity(MomentumSpeed, flipMod);
@@ -555,6 +569,9 @@ public partial class PlayerController : CharacterBody2D
 
 	private void OnLanding()
 	{
+		// Re-enable floor snap now that we're grounded
+		FloorSnapLength = 48f;
+
 		// If landing while aerial-tucking and tuck is still held, go straight to grounded tuck
 		bool landIntoTuck = _tuckInputHeld;
 		CurrentMoveState = landIntoTuck ? MoveState.Tucking : MoveState.Grounded;
@@ -564,7 +581,7 @@ public partial class PlayerController : CharacterBody2D
 		_airVelocity = Vector2.Zero;
 
 		// Update visual tuck state
-		if (SkiNode != null) SkiNode.IsTucking = landIntoTuck;
+		SetSkiTucking(landIntoTuck);
 
 		// Reset sprite rotation
 		if (_playerSprite != null)
@@ -573,22 +590,33 @@ public partial class PlayerController : CharacterBody2D
 
 	private void OnFlipLanding()
 	{
-		// Check landing angle
-		bool landingSafe = MomentumPhysics.IsLandingSafe(_flipRotation);
+		// Re-enable floor snap now that we're grounded
+		FloorSnapLength = 48f;
 
-		if (_flipCompleted && landingSafe)
+		// Check landing angle - made more forgiving (90 degrees instead of 35)
+		float normalized = _flipRotation % Mathf.Tau;
+		if (normalized < 0f) normalized += Mathf.Tau;
+		float toleranceRad = Mathf.DegToRad(90f); // Much more forgiving!
+		bool landingSafe = normalized <= toleranceRad || normalized >= (Mathf.Tau - toleranceRad);
+
+		// Award points if at least one flip was completed
+		if (_flipCount > 0 && landingSafe)
 		{
 			// Successful flip — momentum boost + drag reduction window
 			MomentumSpeed = Mathf.Abs(_airVelocity.X) * PhysicsConstants.FlipSuccessSpeedBoost;
 			_flipBonusTimer = PhysicsConstants.FlipSuccessDragWindowDuration;
+
+			// Award points: 100 per flip
+			int points = _flipCount * 100;
 			EmitSignal(SignalName.FlipCompleted);
-			GD.Print($"[PlayerController] Flip success! Speed boosted to {MomentumSpeed:F0}");
+			EmitSignal(SignalName.FlipPointsScored, points, _flipCount);
+			GD.Print($"[PlayerController] Flip success! {_flipCount} flip(s), {points} points! Speed boosted to {MomentumSpeed:F0}");
 		}
 		else
 		{
 			// Failed flip — crash
 			EmitSignal(SignalName.FlipFailed);
-			OnCrash(_flipCompleted ? "Bad landing angle" : "Incomplete rotation");
+			OnCrash(landingSafe ? "No flips completed" : "Bad landing angle");
 			return;
 		}
 
@@ -596,6 +624,8 @@ public partial class PlayerController : CharacterBody2D
 		_flipRotation = 0f;
 		_flipAngularVelocity = 0f;
 		_flipCompleted = false;
+		_flipInputHeld = false;
+		_flipCount = 0;
 		_airVelocity = Vector2.Zero;
 
 		if (_playerSprite != null)
@@ -615,24 +645,24 @@ public partial class PlayerController : CharacterBody2D
 		if (canGroundTuck && CurrentMoveState == MoveState.Grounded)
 		{
 			CurrentMoveState = MoveState.Tucking;
-			if (SkiNode != null) SkiNode.IsTucking = true;
+			SetSkiTucking(true);
 		}
 		else if (!canGroundTuck && CurrentMoveState == MoveState.Tucking)
 		{
 			CurrentMoveState = MoveState.Grounded;
-			if (SkiNode != null) SkiNode.IsTucking = false;
+			SetSkiTucking(false);
 		}
 
 		// ── Aerial tuck: press/hold tuck while airborne ────────────
 		if (CurrentMoveState == MoveState.Airborne && _tuckInputHeld)
 		{
 			CurrentMoveState = MoveState.AirborneTucking;
-			if (SkiNode != null) SkiNode.IsTucking = true;
+			SetSkiTucking(true);
 		}
 		else if (CurrentMoveState == MoveState.AirborneTucking && !_tuckInputHeld)
 		{
 			CurrentMoveState = MoveState.Airborne;
-			if (SkiNode != null) SkiNode.IsTucking = false;
+			SetSkiTucking(false);
 		}
 	}
 
@@ -661,17 +691,16 @@ public partial class PlayerController : CharacterBody2D
 		_swapTimer = PhysicsConstants.SwapCooldown;
 
 		EmitSignal(SignalName.VehicleSwapped, (int)CurrentVehicleType);
+	}
 
-		// Perfect swap detection
-		bool isPerfect =
-			(CurrentVehicleType == VehicleType.Ski && CurrentTerrain == TerrainType.Snow) ||
-			(CurrentVehicleType == VehicleType.Bike && CurrentTerrain == TerrainType.Dirt);
+	// ── Obstacle Collision ──────────────────────────────────────────
 
-		if (isPerfect)
-		{
-			EmitSignal(SignalName.PerfectSwap);
-			GD.Print("[PlayerController] Perfect swap!");
-		}
+	/// <summary>
+	/// Apply a speed penalty from a non-fatal obstacle collision (e.g., logs, small rocks).
+	/// </summary>
+	public void ApplySpeedPenalty(float penaltyAmount)
+	{
+		MomentumSpeed = Mathf.Max(PhysicsConstants.MinimumSpeed, MomentumSpeed - penaltyAmount);
 	}
 
 	// ── Reset ───────────────────────────────────────────────────────
@@ -702,11 +731,12 @@ public partial class PlayerController : CharacterBody2D
 		_flipRotation = 0f;
 		_flipAngularVelocity = 0f;
 		_flipCompleted = false;
+		_flipInputHeld = false;
+		_flipCount = 0;
 		_flipBonusTimer = 0f;
 
 		_tuckInputHeld = false;
-		_brakeInputHeld = false;
-		if (SkiNode != null) SkiNode.IsTucking = false;
+		SetSkiTucking(false);
 
 		if (_playerSprite != null) _playerSprite.Rotation = 0f;
 
@@ -830,13 +860,22 @@ public partial class PlayerController : CharacterBody2D
 		_flipRotation = 0f;
 		_flipAngularVelocity = 0f;
 		_flipCompleted = false;
-		if (SkiNode != null) SkiNode.IsTucking = false;
+		_flipInputHeld = false;
+		_flipCount = 0;
+		SetSkiTucking(false);
 		_tuckInputHeld = false;
-		_brakeInputHeld = false;
 		_airVelocity = Vector2.Zero;
 
 		CurrentMoveState = MoveState.Grounded;
 		EmitSignal(SignalName.PlayerCrashed);
 		GD.Print($"[PlayerController] Crashed — {reason}");
+	}
+
+	// ── Helper Methods ──────────────────────────────────────────────
+
+	/// <summary>Sets the ski tucking visual state if SkiNode exists.</summary>
+	private void SetSkiTucking(bool value)
+	{
+		if (SkiNode != null) SkiNode.IsTucking = value;
 	}
 }

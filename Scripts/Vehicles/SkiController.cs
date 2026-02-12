@@ -39,7 +39,7 @@ public partial class SkiController : VehicleBase
     /// <summary>
     /// Ski terrain bonuses:
     ///   Snow: +100 px/s^2 (excels — designed for snow)
-    ///   Dirt: -100 px/s^2 (struggles — skis catch on dirt)
+    ///   Dirt: -180 px/s^2 (struggles — skis catch on dirt)
     ///   Ice:  +60 px/s^2 (good — low friction surface matches skis)
     /// </summary>
     public override float GetTerrainBonus(TerrainType terrain) => terrain switch
@@ -53,7 +53,7 @@ public partial class SkiController : VehicleBase
     /// <summary>
     /// Ski friction modifiers:
     ///   Snow: 0.6 (smooth glide)
-    ///   Dirt: 1.5 (high friction — skis scrape)
+    ///   Dirt: 2.0 (high friction — skis scrape)
     ///   Ice:  0.4 (very low friction)
     /// </summary>
     public override float GetTerrainFrictionModifier(TerrainType terrain) => terrain switch
@@ -67,7 +67,7 @@ public partial class SkiController : VehicleBase
     /// <summary>
     /// Ski drag modifiers per terrain:
     ///   Snow: 0.8 (reduced — at home)
-    ///   Dirt: 1.3 (debris increases drag)
+    ///   Dirt: 1.6 (debris increases drag)
     ///   Ice:  0.7 (very clean surface)
     /// </summary>
     public override float GetTerrainDragModifier(TerrainType terrain) => terrain switch

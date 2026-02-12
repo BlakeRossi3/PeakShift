@@ -5,7 +5,8 @@
       "Bash(git commit:*)",
       "Bash(magick:*)",
       "Bash(convert:*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(grep:*)"
     ]
   }
 }

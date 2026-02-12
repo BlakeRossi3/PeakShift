@@ -44,9 +44,6 @@ public static class PhysicsConstants
     /// <summary>Rolling resistance multiplier when tucking.</summary>
     public const float TuckRollingResistanceMultiplier = 0.7f;
 
-    /// <summary>Steering authority multiplier when tucking (reduced control).</summary>
-    public const float TuckSteeringMultiplier = 0.5f;
-
     /// <summary>Acceleration bonus multiplier on downhill while tucking.</summary>
     public const float TuckDownhillAccelBonus = 1.15f;
 
@@ -151,7 +148,10 @@ public static class PhysicsConstants
     public const float FlipSuccessDragMultiplier = 0.5f;
 
     /// <summary>Upward velocity impulse applied when initiating a flip (px/s). Acts like an air-jump.</summary>
-    public const float FlipLaunchImpulse = -350f;
+    public const float FlipLaunchImpulse = -600f;
+
+    /// <summary>Gravity multiplier during flip (lower = floatier, more air time for tricks).</summary>
+    public const float FlipGravityMultiplier = 0.6f;
 
     // ── Jump Clearance ─────────────────────────────────────────────
     // These parameters govern the "must-clear-the-gap" momentum rule.
@@ -202,7 +202,6 @@ public static class PhysicsConstants
 
     // ── Coyote Time & Buffers ────────────────────────────────────────
     public const float CoyoteTime = 0.1f;
-    public const float JumpBufferTime = 0.12f;
 
     // ── Brake ──────────────────────────────────────────────────────────
     /// <summary>Drag multiplier when braking (bike only). Much higher drag to slow down.</summary>
@@ -211,13 +210,6 @@ public static class PhysicsConstants
     /// <summary>Minimum speed while braking — can't fully stop.</summary>
     public const float BrakeMinSpeed = 40f;
 
-    // ── Slope Thresholds ─────────────────────────────────────────────
-    /// <summary>Minimum slope angle (degrees) to count as "downhill" for acceleration.</summary>
-    public const float MinSlopeAngle = 2f;
-
     // ── Vehicle Swap ─────────────────────────────────────────────────
     public const float SwapCooldown = 0.8f;
-
-    /// <summary>Speed penalty multiplier on swap to wrong terrain (e.g. bike on snow).</summary>
-    public const float BadSwapSpeedPenalty = 0.9f;
 }

@@ -5,7 +5,8 @@ namespace PeakShift.Terrain;
 /// <summary>
 /// Controls how difficulty scales with distance. The generator queries this
 /// to determine max allowed difficulty, terrain switch frequency, gap tolerances,
-/// and slope steepness at any given distance into the run.
+/// slope steepness, guidance slope angle, and procedural variety at any given
+/// distance into the run.
 /// </summary>
 public class DifficultyProfile
 {
@@ -56,6 +57,45 @@ public class DifficultyProfile
     /// <summary>Distance at which gap multiplier is fully ramped.</summary>
     public float GapRampDistance { get; set; } = 18000f;
 
+    // ── Guidance Slope ───────────────────────────────────────────
+    // Macro-level downhill angle the terrain follows.
+    // Early run is gentle, late run is steep.
+
+    /// <summary>Guidance slope angle at the start of the run (degrees).</summary>
+    public float GuidanceSlopeAngleEarly { get; set; } = 5f;
+
+    /// <summary>Guidance slope angle at maximum difficulty (degrees).</summary>
+    public float GuidanceSlopeAngleLate { get; set; } = 18f;
+
+    /// <summary>Distance at which guidance slope reaches maximum angle (px).</summary>
+    public float GuidanceSlopeRampDistance { get; set; } = 25000f;
+
+    // ── Procedural Variety Controls ──────────────────────────────
+
+    /// <summary>Minimum variance around the guidance slope for descent drop.</summary>
+    public float DescentDropVarianceMin { get; set; } = 0.6f;
+
+    /// <summary>Maximum variance around the guidance slope for descent drop.</summary>
+    public float DescentDropVarianceMax { get; set; } = 1.5f;
+
+    /// <summary>Ramp rise as a fraction of the preceding descent's drop (early).</summary>
+    public float RampRiseToDropRatio { get; set; } = 0.35f;
+
+    /// <summary>Ramp rise as a fraction of the preceding descent's drop (late).</summary>
+    public float RampRiseToDropRatioMax { get; set; } = 0.50f;
+
+    /// <summary>Flat breather probability per generation cycle.</summary>
+    public float FlatBreatherChance { get; set; } = 0.12f;
+
+    /// <summary>Bump/roller probability per generation cycle.</summary>
+    public float BumpRollerChance { get; set; } = 0.15f;
+
+    /// <summary>Chance of skipping the ramp (descent flows into next descent).</summary>
+    public float SkipRampChance { get; set; } = 0.10f;
+
+    /// <summary>Chance of a double-descent (two descents back to back before a ramp).</summary>
+    public float DoubleDescentChance { get; set; } = 0.08f;
+
     // ── Query methods ────────────────────────────────────────────
 
     /// <summary>Returns the maximum difficulty tier allowed at the given distance.</summary>
@@ -90,5 +130,25 @@ public class DifficultyProfile
     {
         float t = Mathf.Clamp(distance / GapRampDistance, 0f, 1f);
         return Mathf.Lerp(BaseGapMultiplier, MaxGapMultiplier, t);
+    }
+
+    /// <summary>
+    /// Returns the guidance slope angle (degrees) at the given distance.
+    /// Linearly interpolated between early and late values.
+    /// </summary>
+    public float GetGuidanceSlopeAngle(float distance)
+    {
+        float t = Mathf.Clamp(distance / GuidanceSlopeRampDistance, 0f, 1f);
+        return Mathf.Lerp(GuidanceSlopeAngleEarly, GuidanceSlopeAngleLate, t);
+    }
+
+    /// <summary>
+    /// Returns the tangent of the guidance slope at a given distance.
+    /// Use: drop = length * GetGuidanceSlopeTan(distance)
+    /// </summary>
+    public float GetGuidanceSlopeTan(float distance)
+    {
+        float angleDeg = GetGuidanceSlopeAngle(distance);
+        return Mathf.Tan(Mathf.DegToRad(angleDeg));
     }
 }

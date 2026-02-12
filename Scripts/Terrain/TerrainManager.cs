@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Godot;
 using PeakShift.Terrain;
+using PeakShift.Obstacles;
 
 namespace PeakShift;
 
@@ -46,7 +47,7 @@ public partial class TerrainManager : Node2D
     private const float BaseGroundY = 200f;
     private const float PointSpacing = 32f;
     private const float SpawnX = -256f;
-    private const float FillDepthBelowSurface = 1000f;
+    private const float FillDepthBelowSurface = 5000f;
 
     // ── Module system ────────────────────────────────────────────
 
@@ -54,10 +55,12 @@ public partial class TerrainManager : Node2D
     private ModuleCatalog _catalog;
     private DifficultyProfile _difficulty;
     private ModulePool _pool;
+    private ObstaclePool _obstaclePool;
 
     // ── Chunk tracking ───────────────────────────────────────────
 
     public List<ChunkInstance> ActiveChunks { get; } = new();
+    private List<ObstacleInstance> _activeObstacles = new();
 
     private float _nextSpawnX;
 
@@ -109,6 +112,12 @@ public partial class TerrainManager : Node2D
         public bool IsGap { get; init; }
     }
 
+    private class ObstacleInstance
+    {
+        public ObstacleBase Obstacle { get; init; }
+        public float WorldX { get; init; }
+    }
+
     // ── Lifecycle ────────────────────────────────────────────────
 
     public override void _Ready()
@@ -122,6 +131,7 @@ public partial class TerrainManager : Node2D
             DespawnBehind = DespawnDistance
         };
         _pool = new ModulePool(this, PoolPrewarmCount);
+        _obstaclePool = new ObstaclePool(this, prewarmCountPerType: 10);
 
         // Initialize generator
         _generator.Initialize(SpawnX, BaseGroundY);
@@ -134,7 +144,7 @@ public partial class TerrainManager : Node2D
 
         GD.Print("[TerrainManager] Initialized with modular track generator");
         GD.Print($"[TerrainManager] Catalog: {_catalog.All.Count} modules, " +
-                 $"Pool: {_pool.TotalCreated} pre-warmed");
+                 $"Pool: {_pool.TotalCreated} terrain chunks, {_obstaclePool.TotalCreated} obstacles pre-warmed");
     }
 
     public override void _PhysicsProcess(double delta)
@@ -146,6 +156,7 @@ public partial class TerrainManager : Node2D
 
         // Recycle rendered chunks behind the player
         RecycleChunks(playerX);
+        RecycleObstacles(playerX);
 
         // Spawn new chunks
         while (ActiveChunks.Count < ChunksAhead)
@@ -323,7 +334,7 @@ public partial class TerrainManager : Node2D
         TerrainType terrainType = currentMod.Template.GetTerrainTypeAt(t);
 
         // For gap modules, don't render surface geometry
-        if (currentMod.IsGapModule)
+        if (currentMod.Template.Shape == TrackModule.ModuleShape.Gap)
         {
             ActiveChunks.Add(new ChunkInstance
             {
@@ -339,6 +350,13 @@ public partial class TerrainManager : Node2D
 
         int resolution = Mathf.Max(3, (int)(chunkWidth / PointSpacing) + 1);
         CreateTerrainChunk(_nextSpawnX, chunkWidth, resolution, terrainType, currentMod);
+
+        // Spawn obstacles for this chunk if the module has obstacle density
+        if (currentMod.Template.ObstacleDensity > 0f)
+        {
+            SpawnObstaclesForChunk(_nextSpawnX, chunkWidth, terrainType, currentMod);
+        }
+
         _nextSpawnX += chunkWidth;
     }
 
@@ -401,6 +419,62 @@ public partial class TerrainManager : Node2D
         });
     }
 
+    // ── Obstacle spawning ────────────────────────────────────────
+
+    private void SpawnObstaclesForChunk(float chunkWorldX, float chunkWidth,
+                                         TerrainType terrainType,
+                                         ModuleTrackGenerator.PlacedModule module)
+    {
+        if (module.Template.ObstacleDensity <= 0f) return;
+
+        // Determine obstacle types to use
+        var allowedTypes = module.Template.AllowedObstacleTypes;
+        if (allowedTypes == null || allowedTypes.Length == 0)
+        {
+            // Default: all types allowed based on terrain
+            allowedTypes = terrainType switch
+            {
+                TerrainType.Snow => new[] { "Rock", "Tree", "Log" },
+                TerrainType.Dirt => new[] { "Rock", "Tree", "Log" },
+                TerrainType.Ice => new[] { "Rock" }, // Only rocks on ice
+                _ => new[] { "Rock" }
+            };
+        }
+
+        // Calculate number of obstacles to spawn based on density
+        // Base: ~1 obstacle per 500 pixels at max density
+        int baseCount = Mathf.Max(1, (int)(chunkWidth / 500f));
+        int obstacleCount = Mathf.Max(1, (int)(baseCount * module.Template.ObstacleDensity));
+
+        for (int i = 0; i < obstacleCount; i++)
+        {
+            // Random position within chunk
+            float localX = GD.Randf() * chunkWidth;
+            float worldX = chunkWorldX + localX;
+
+            // Get terrain height at this position
+            float terrainY = module.HeightAt(worldX);
+
+            // Random obstacle type from allowed types
+            string obstacleType = allowedTypes[(int)(GD.Randf() * allowedTypes.Length)];
+
+            // Acquire from pool
+            var obstacle = _obstaclePool.Acquire(obstacleType);
+            if (obstacle == null) continue;
+
+            // Activate at position (slightly above terrain surface)
+            Vector2 spawnPos = new Vector2(worldX, terrainY - 16f);
+            obstacle.Activate(spawnPos, terrainType);
+
+            // Track active obstacle
+            _activeObstacles.Add(new ObstacleInstance
+            {
+                Obstacle = obstacle,
+                WorldX = worldX
+            });
+        }
+    }
+
     // ── Recycling ───────────────────────────────────────────────
 
     public void RecycleChunks(float playerX)
@@ -414,6 +488,17 @@ public partial class TerrainManager : Node2D
         });
     }
 
+    private void RecycleObstacles(float playerX)
+    {
+        _activeObstacles.RemoveAll(obs =>
+        {
+            bool shouldRemove = (playerX - obs.WorldX) > DespawnDistance;
+            if (shouldRemove && obs.Obstacle != null)
+                _obstaclePool.Release(obs.Obstacle);
+            return shouldRemove;
+        });
+    }
+
     /// <summary>Clear all chunks and reset for a new run.</summary>
     public void Reset()
     {
@@ -423,6 +508,14 @@ public partial class TerrainManager : Node2D
                 _pool.Release(chunk.SceneNode);
         }
         ActiveChunks.Clear();
+
+        // Clear all obstacles
+        foreach (var obs in _activeObstacles)
+        {
+            if (obs.Obstacle != null)
+                _obstaclePool.Release(obs.Obstacle);
+        }
+        _activeObstacles.Clear();
 
         // Re-initialize generator
         _generator.Initialize(SpawnX, BaseGroundY);
