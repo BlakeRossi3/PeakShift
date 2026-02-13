@@ -21,7 +21,7 @@ public partial class PlayerCamera : Camera2D
 
 	/// <summary>Never zoom out further than this.</summary>
 	[Export]
-	public float MinZoom { get; set; } = 0.12f;
+	public float MinZoom { get; set; } = 0.06f;
 
 	/// <summary>Extra pixels of padding below the terrain surface.</summary>
 	[Export]
@@ -48,7 +48,7 @@ public partial class PlayerCamera : Camera2D
 
 	/// <summary>How quickly the camera follows the player position (higher = tighter).</summary>
 	[Export]
-	public float FollowSpeed { get; set; } = 18f;
+	public float FollowSpeed { get; set; } = 25f;
 
 	private PlayerController _player;
 	private TerrainManager _terrain;
@@ -91,17 +91,18 @@ public partial class PlayerCamera : Camera2D
 			float playerY = _player.GlobalPosition.Y;
 			float playerX = _player.GlobalPosition.X;
 
-			// Check terrain height directly below and slightly ahead
-			float terrainBelow = _terrain.GetTerrainHeight(playerX);
-			float terrainAhead = _terrain.GetTerrainHeight(playerX + 300f);
-			float terrainY = Mathf.Max(terrainBelow, terrainAhead);
+			// Sample terrain at multiple points ahead to find the deepest surface
+			float terrainY = _terrain.GetTerrainHeight(playerX);
+			for (float dx = 200f; dx <= 1200f; dx += 200f)
+				terrainY = Mathf.Max(terrainY, _terrain.GetTerrainHeight(playerX + dx));
 
 			float gap = terrainY - playerY + BottomMargin;
 
 			if (gap > 0f)
 			{
 				float viewportH = GetViewportRect().Size.Y;
-				float neededZoom = viewportH / (2f * gap);
+				// Use 1.4x gap so terrain isn't right at the screen edge
+				float neededZoom = viewportH / (1.4f * gap);
 				targetZoom = Mathf.Min(DefaultZoom, neededZoom);
 				targetZoom = Mathf.Max(MinZoom, targetZoom);
 			}

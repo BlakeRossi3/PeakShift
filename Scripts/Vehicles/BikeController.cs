@@ -17,8 +17,8 @@ public partial class BikeController : VehicleBase
 
     // ── Physics Properties ───────────────────────────────────────────
 
-    /// <summary>Moderate air weight — still grounded feel but much less punishing.</summary>
-    public override float GravityMultiplier => 0.75f;
+    /// <summary>Heavy — snappy air control, grounded feel.</summary>
+    public override float GravityMultiplier => 0.95f;
 
     /// <summary>Moderate drag — slightly less aerodynamic than skis.</summary>
     public override float DragModifier => 1.0f;

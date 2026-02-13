@@ -177,15 +177,6 @@ public partial class HUDController : CanvasLayer
         string airState = p.DebugIsAirborne ? "AIRBORNE" : "GROUNDED";
         string gapState = p.DebugOverGap ? " [OVER GAP]" : "";
 
-        string clearanceInfo = "";
-        if (p.LastClearanceValid)
-        {
-            var r = p.LastClearanceResult;
-            clearanceInfo = r.Clears
-                ? $"\nGap: CLEAR ({r.JumpDistance:F0}px jump)"
-                : $"\nGap: FAIL (landed {r.LandingX:F0}, needed further)";
-        }
-
         string moduleInfo = "";
         if (TerrainRef != null)
         {
@@ -219,7 +210,6 @@ public partial class HUDController : CanvasLayer
             $"Terrain: {p.DebugTerrainType}\n" +
             $"Vehicle: {p.CurrentVehicleType}" +
             tuckInfo +
-            clearanceInfo +
             moduleInfo;
     }
 

@@ -100,7 +100,7 @@ public partial class PlayerController : CharacterBody2D
 	private float _flipRotation;
 	private float _flipAngularVelocity;
 	private bool _flipCompleted;
-	private bool _flipInputHeld;
+	private int _targetFlipCount;
 	private int _flipCount; // Number of full 360° rotations completed
 
 	// Post-flip bonus window
@@ -115,14 +115,9 @@ public partial class PlayerController : CharacterBody2D
 	// Slope-following visual rotation
 	private float _visualRotation;
 
-	// ── Jump clearance tracking ────────────────────────────────────
-	// Tracks whether we've evaluated the current gap so we only check once per gap.
-	private bool _gapEvaluated;
-	private float _lastEvaluatedGapStartX = float.MinValue;
+	// Smoothed floor normal to prevent jitter at chunk boundaries
+	private Vector2 _smoothedFloorNormal = Vector2.Up;
 
-	// Debug: last clearance prediction result (read by HUD)
-	public GapClearanceResult LastClearanceResult { get; private set; }
-	public bool LastClearanceValid { get; private set; }
 
 	// ── Debug state (exposed for HUD overlay) ──────────────────────
 	public float DebugSlopeAngleDeg { get; private set; }
@@ -204,19 +199,11 @@ public partial class PlayerController : CharacterBody2D
 				}
 				EnterFlipping();
 			}
-			// If already flipping, start rotating again
+			// If already flipping, queue another flip
 			else if (CurrentMoveState == MoveState.Flipping)
 			{
-				_flipInputHeld = true;
-			}
-		}
-
-		// Stop rotation when space is released during flip
-		if (@event.IsActionReleased("jump"))
-		{
-			if (CurrentMoveState == MoveState.Flipping)
-			{
-				_flipInputHeld = false;
+				_targetFlipCount++;
+				GD.Print($"[PlayerController] Queued flip #{_targetFlipCount}");
 			}
 		}
 
@@ -306,26 +293,27 @@ public partial class PlayerController : CharacterBody2D
 		bool isTucking = CurrentMoveState == MoveState.Tucking;
 
 		// ── Compute slope from floor normal or terrain query ────────
-		Vector2 floorNormal;
-		float slopeAngleRad;
+		// Smooth the floor normal to eliminate jitter at chunk boundaries
+		Vector2 rawNormal;
 
 		if (IsOnFloor())
 		{
-			floorNormal = GetFloorNormal();
-			slopeAngleRad = MomentumPhysics.ComputeSignedSlopeAngle(floorNormal);
+			rawNormal = GetFloorNormal();
 			_coyoteTimer = PhysicsConstants.CoyoteTime;
 		}
 		else if (_terrainManager != null)
 		{
-			// Not on floor but may be close — use terrain data for physics
-			floorNormal = _terrainManager.GetTerrainNormalAt(GlobalPosition.X);
-			slopeAngleRad = MomentumPhysics.ComputeSignedSlopeAngle(floorNormal);
+			rawNormal = _terrainManager.GetTerrainNormalAt(GlobalPosition.X);
 		}
 		else
 		{
-			floorNormal = Vector2.Up;
-			slopeAngleRad = 0f;
+			rawNormal = Vector2.Up;
 		}
+
+		// Exponential smoothing — converges fast (20/s) but prevents single-frame spikes
+		_smoothedFloorNormal = _smoothedFloorNormal.Lerp(rawNormal, 1f - Mathf.Exp(-20f * dt)).Normalized();
+		Vector2 floorNormal = _smoothedFloorNormal;
+		float slopeAngleRad = MomentumPhysics.ComputeSignedSlopeAngle(floorNormal);
 
 		DebugSlopeAngleDeg = Mathf.RadToDeg(slopeAngleRad);
 
@@ -343,7 +331,8 @@ public partial class PlayerController : CharacterBody2D
 			isTucking, terrainDragMod * vehicleDragTerrainMod, vehicleDragMod);
 
 		float effectiveRollingResistance = MomentumPhysics.GetEffectiveRollingResistance(
-			isTucking, terrainFriction, vehicleFrictionMod);
+			isTucking, terrainFriction, vehicleFrictionMod)
+			* CurrentVehicle.RollingResistanceModifier;
 
 		// Apply post-flip bonus drag reduction
 		if (_flipBonusTimer > 0f)
@@ -502,14 +491,16 @@ public partial class PlayerController : CharacterBody2D
 		_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, flipGravMult);
 		Velocity = _airVelocity;
 
-		// ── Integrate rotation (only while holding space) ───────────
-		float previousRotation = _flipRotation;
+		// ── Integrate rotation toward target flip count ─────────────
+		float maxRotation = _targetFlipCount * Mathf.Tau;
 
-		if (_flipInputHeld)
+		if (_flipRotation < maxRotation)
 		{
 			_flipRotation = MomentumPhysics.IntegrateFlipRotation(_flipRotation, _flipAngularVelocity, dt);
+			// Clamp to target to prevent overshoot
+			if (_flipRotation >= maxRotation)
+				_flipRotation = maxRotation;
 		}
-		// else: rotation frozen at current angle
 
 		// Apply visual rotation
 		if (_playerSprite != null)
@@ -561,10 +552,8 @@ public partial class PlayerController : CharacterBody2D
 		// Update visual tuck state
 		SetSkiTucking(wasTucking);
 
-		// ── Jump clearance check ───────────────────────────────────
-		// When launching over a gap, predict trajectory and fail immediately
-		// if the player doesn't have enough momentum to clear.
-		EvaluateGapClearance();
+		// Gap clearance is no longer predicted — player flies the trajectory
+		// and dies naturally from FallDeathBelowTerrain if they miss.
 	}
 
 	private void EnterFlipping()
@@ -575,8 +564,8 @@ public partial class PlayerController : CharacterBody2D
 		CurrentMoveState = MoveState.Flipping;
 		_flipRotation = 0f;
 		_flipCompleted = false;
-		_flipInputHeld = true; // Start with input held
-		_flipCount = 0; // Reset flip counter
+		_targetFlipCount = 1; // One press = one full flip
+		_flipCount = 0;
 
 		float flipMod = CurrentVehicle?.FlipSpeedModifier ?? 1.0f;
 		_flipAngularVelocity = MomentumPhysics.ComputeFlipAngularVelocity(MomentumSpeed, flipMod);
@@ -596,8 +585,9 @@ public partial class PlayerController : CharacterBody2D
 		bool landIntoTuck = _tuckInputHeld;
 		CurrentMoveState = landIntoTuck ? MoveState.Tucking : MoveState.Grounded;
 
-		// Recover momentum speed from horizontal air velocity
-		MomentumSpeed = Mathf.Abs(_airVelocity.X);
+		// Project full air velocity onto slope tangent to preserve energy from steep dives
+		Vector2 landNormal = IsOnFloor() ? GetFloorNormal() : Vector2.Up;
+		MomentumSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal);
 		_airVelocity = Vector2.Zero;
 
 		// Update visual tuck state
@@ -608,50 +598,47 @@ public partial class PlayerController : CharacterBody2D
 
 	private void OnFlipLanding()
 	{
-		// Re-enable floor snap now that we're grounded
-		FloorSnapLength = 48f;
-
 		// Check landing angle - made more forgiving (90 degrees instead of 35)
 		float normalized = _flipRotation % Mathf.Tau;
 		if (normalized < 0f) normalized += Mathf.Tau;
 		float toleranceRad = Mathf.DegToRad(90f); // Much more forgiving!
 		bool landingSafe = normalized <= toleranceRad || normalized >= (Mathf.Tau - toleranceRad);
 
-		// Award points if at least one flip was completed
 		if (_flipCount > 0 && landingSafe)
 		{
-			// Successful flip — momentum boost + drag reduction window
-			MomentumSpeed = Mathf.Abs(_airVelocity.X) * PhysicsConstants.FlipSuccessSpeedBoost;
+			// Successful flip — project speed onto slope, apply boost, then bounce
+			Vector2 landNormal = IsOnFloor() ? GetFloorNormal() : Vector2.Up;
+			float projectedSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal);
+			float boostedSpeed = projectedSpeed * PhysicsConstants.FlipSuccessSpeedBoost;
+			MomentumSpeed = boostedSpeed;
 			_flipBonusTimer = PhysicsConstants.FlipSuccessDragWindowDuration;
 
 			// Award points: 100 per flip
 			int points = _flipCount * 100;
 			EmitSignal(SignalName.FlipCompleted);
 			EmitSignal(SignalName.FlipPointsScored, points, _flipCount);
-			GD.Print($"[PlayerController] Flip success! {_flipCount} flip(s), {points} points! Speed boosted to {MomentumSpeed:F0}");
+			GD.Print($"[PlayerController] Flip bounce! {_flipCount} flip(s), {points} points! Speed: {boostedSpeed:F0}");
+
+			// Reset flip state
+			_flipRotation = 0f;
+			_flipAngularVelocity = 0f;
+			_flipCompleted = false;
+			_targetFlipCount = 0;
+			_flipCount = 0;
+
+			// Bounce: stay airborne with an upward impulse instead of snapping to ground
+			_airVelocity = new Vector2(boostedSpeed, -PhysicsConstants.FlipBounceImpulse);
+			CurrentMoveState = MoveState.Airborne;
+			FloorSnapLength = 0f;
+
+			// Don't snap visual rotation — ProcessGrounded will lerp it on the bounce landing
 		}
 		else
 		{
 			// Failed flip — crash
 			EmitSignal(SignalName.FlipFailed);
 			OnCrash(landingSafe ? "No flips completed" : "Bad landing angle");
-			return;
 		}
-
-		// Reset flip state
-		_flipRotation = 0f;
-		_flipAngularVelocity = 0f;
-		_flipCompleted = false;
-		_flipInputHeld = false;
-		_flipCount = 0;
-		_airVelocity = Vector2.Zero;
-
-		// Reset visual rotation — ProcessGrounded will smoothly lerp to slope angle
-		_visualRotation = 0f;
-		if (_playerSprite != null)
-			_playerSprite.Rotation = 0f;
-
-		CurrentMoveState = MoveState.Grounded;
 	}
 
 	// ── Tuck Management ─────────────────────────────────────────────
@@ -753,7 +740,7 @@ public partial class PlayerController : CharacterBody2D
 		_flipRotation = 0f;
 		_flipAngularVelocity = 0f;
 		_flipCompleted = false;
-		_flipInputHeld = false;
+		_targetFlipCount = 0;
 		_flipCount = 0;
 		_flipBonusTimer = 0f;
 
@@ -765,68 +752,7 @@ public partial class PlayerController : CharacterBody2D
 
 		CurrentTerrain = TerrainType.Snow;
 
-		_gapEvaluated = false;
-		_lastEvaluatedGapStartX = float.MinValue;
-		LastClearanceValid = false;
-
 		GD.Print("[PlayerController] Reset for new run");
-	}
-
-	// ── Jump Clearance ──────────────────────────────────────────
-
-	/// <summary>
-	/// Evaluates whether the player can clear the current/next gap based on
-	/// their launch velocity. Called once per gap when transitioning to airborne.
-	/// If the trajectory prediction says the player will land short, the run
-	/// ends immediately — this is the core "momentum-or-die" rule.
-	/// </summary>
-	private void EvaluateGapClearance()
-	{
-		if (_terrainManager == null) return;
-
-		var gap = _terrainManager.GetCurrentOrNextGap(GlobalPosition.X);
-		if (!gap.Found) return;
-
-		// Only evaluate each gap once (avoid re-checking on centripetal bounces
-		// within the same gap region)
-		if (Mathf.IsEqualApprox(_lastEvaluatedGapStartX, gap.GapStartX, 1f))
-			return;
-
-		// Only evaluate if we're near the gap (within ramp approach distance)
-		float distToGap = gap.GapStartX - GlobalPosition.X;
-		if (distToGap > 200f) return; // Too far from gap, this is a mid-descent launch
-
-		_lastEvaluatedGapStartX = gap.GapStartX;
-		_gapEvaluated = true;
-
-		float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
-
-		var result = MomentumPhysics.PredictGapClearance(
-			GlobalPosition,
-			_airVelocity,
-			gravMult,
-			gap.GapStartX,
-			gap.GapEndX,
-			gap.LandingY,
-			PhysicsConstants.GapClearanceRatio,
-			PhysicsConstants.LandingForgivenessPx,
-			PhysicsConstants.LandingVerticalTolerancePx);
-
-		LastClearanceResult = result;
-		LastClearanceValid = true;
-
-		if (!result.Clears)
-		{
-			GD.Print($"[PlayerController] Gap clearance FAILED — speed: {MomentumSpeed:F0}, " +
-				$"predicted landing: ({result.LandingX:F0}, {result.LandingY:F0}), " +
-				$"gap: {gap.GapStartX:F0}–{gap.GapEndX:F0}, needed: {gap.GapStartX + gap.Width * PhysicsConstants.GapClearanceRatio:F0}");
-			OnCrash("Insufficient momentum to clear gap");
-		}
-		else
-		{
-			GD.Print($"[PlayerController] Gap clearance OK — predicted landing X: {result.LandingX:F0}, " +
-				$"jump distance: {result.JumpDistance:F0}px, gap width: {gap.Width:F0}px");
-		}
 	}
 
 	/// <summary>
@@ -884,7 +810,7 @@ public partial class PlayerController : CharacterBody2D
 		_flipRotation = 0f;
 		_flipAngularVelocity = 0f;
 		_flipCompleted = false;
-		_flipInputHeld = false;
+		_targetFlipCount = 0;
 		_flipCount = 0;
 		SetSkiTucking(false);
 		_tuckInputHeld = false;
