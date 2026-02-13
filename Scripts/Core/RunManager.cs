@@ -44,7 +44,7 @@ public partial class RunManager : Node
 	{
 		_gameManager = GetNodeOrNull<GameManager>("../GameManager");
 		_biomeManager = GetNodeOrNull<BiomeManager>("../BiomeManager");
-		_hud = GetNodeOrNull<HUDController>("../HUD");
+		_hud = GetNodeOrNull<HUDController>("../UILayer/HUD");
 	}
 
 	public override void _PhysicsProcess(double delta)
