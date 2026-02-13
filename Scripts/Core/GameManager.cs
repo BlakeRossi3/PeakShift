@@ -61,10 +61,10 @@ public partial class GameManager : Node
 		_terrainManager = GetNodeOrNull<TerrainManager>("../TerrainManager");
 		_biomeManager = GetNodeOrNull<BiomeManager>("../BiomeManager");
 		_audioManager = GetNodeOrNull<AudioManager>("../AudioManager");
-		_hud = GetNodeOrNull<HUDController>("../HUD");
-		_mainMenu = GetNodeOrNull<MainMenuController>("../MainMenu");
-		_gameOver = GetNodeOrNull<GameOverController>("../GameOver");
-		_pauseMenu = GetNodeOrNull<PauseMenuController>("../PauseMenu");
+		_hud = GetNodeOrNull<HUDController>("../UILayer/HUD");
+		_mainMenu = GetNodeOrNull<MainMenuController>("../UILayer/MainMenu");
+		_gameOver = GetNodeOrNull<GameOverController>("../UILayer/GameOver");
+		_pauseMenu = GetNodeOrNull<PauseMenuController>("../UILayer/PauseMenu");
 		_avalancheWall = GetNodeOrNull<AvalancheWall>("../AvalancheWall");
 
 		// Give TerrainManager a reference to the player
@@ -104,7 +104,7 @@ public partial class GameManager : Node
 		// GameOver → GameManager
 		if (_gameOver != null)
 		{
-			_gameOver.RetryPressed += StartGame;
+			_gameOver.RetryPressed += ReturnToMenu;
 			_gameOver.MenuPressed += ReturnToMenu;
 		}
 
@@ -196,6 +196,13 @@ public partial class GameManager : Node
 		CurrentState = GameState.Menu;
 		GetTree().Paused = false;
 		EmitSignal(SignalName.StateChanged, (int)CurrentState);
+
+		// Reset everything back to the top of the mountain
+		_player?.ResetForNewRun();
+		_terrainManager?.Reset();
+		_runManager?.ResetRun();
+		_biomeManager?.Reset();
+		_avalancheWall?.Deactivate();
 
 		if (_mainMenu != null) _mainMenu.Visible = true;
 		if (_hud != null) _hud.Visible = false;
