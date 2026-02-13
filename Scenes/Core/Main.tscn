@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3 uid="uid://bc2x4s6dpqynm"]
+[gd_scene load_steps=13 format=3 uid="uid://bc2x4s6dpqynm"]
 
 [ext_resource type="Script" uid="uid://cvl4teyb2n2tt" path="res://Scripts/Core/GameManager.cs" id="1"]
 [ext_resource type="Script" uid="uid://csfwwxx7mtaec" path="res://Scripts/Core/RunManager.cs" id="2"]
@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" path="res://Scenes/UI/GameOver.tscn" id="10"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/PauseMenu.tscn" id="11"]
 [ext_resource type="Script" uid="uid://no2nntlijja0" path="res://Scripts/Player/PlayerCamera.cs" id="12"]
+[ext_resource type="Script" uid="uid://dfpgfd765ab3t" path="res://Scripts/Hazards/AvalancheWall.cs" id="13"]
 
 [node name="Main" type="Node2D"]
 
@@ -49,6 +50,9 @@ script = ExtResource("12")
 
 [node name="TerrainManager" type="Node2D" parent="."]
 script = ExtResource("4")
+
+[node name="AvalancheWall" type="Node2D" parent="."]
+script = ExtResource("13")
 
 [node name="HUD" parent="." instance=ExtResource("8")]
 visible = false

@@ -39,26 +39,26 @@ public class ProceduralModuleFactory
         switch (flavor)
         {
             case "short_steep":
-                minLength = 400f;
-                maxLength = 900f;
+                minLength = 800f;
+                maxLength = 1800f;
                 slopeVarianceMin = 1.2f;
                 slopeVarianceMax = 2.0f;
                 break;
             case "long_gentle":
-                minLength = 2500f;
-                maxLength = 4000f;
+                minLength = 4000f;
+                maxLength = 7000f;
                 slopeVarianceMin = 0.4f;
                 slopeVarianceMax = 0.8f;
                 break;
             case "cruise":
-                minLength = 1800f;
-                maxLength = 3000f;
+                minLength = 3000f;
+                maxLength = 5500f;
                 slopeVarianceMin = 0.5f;
                 slopeVarianceMax = 0.7f;
                 break;
             default: // "normal"
-                minLength = 800f;
-                maxLength = 2500f;
+                minLength = 1500f;
+                maxLength = 4000f;
                 slopeVarianceMin = _difficulty.DescentDropVarianceMin;
                 slopeVarianceMax = _difficulty.DescentDropVarianceMax;
                 break;
@@ -70,14 +70,14 @@ public class ProceduralModuleFactory
         float drop = guidedDrop * variance;
 
         // Clamp to reasonable bounds
-        drop = Mathf.Clamp(drop, 50f, 3000f);
+        drop = Mathf.Clamp(drop, 80f, 5000f);
 
         // Difficulty rating from steepness relative to guidance
         int diff = variance > 1.4f ? 3 : variance > 1.0f ? 2 : 1;
         diff = Mathf.Min(diff, _difficulty.GetMaxDifficulty(distance));
 
-        // Obstacle density scales with length and difficulty
-        float obsDensity = Mathf.Clamp(length / 3000f * diff * 0.3f, 0f, 0.6f);
+        // Obstacle density scales with length and difficulty (sparse — avalanche is the main threat)
+        float obsDensity = Mathf.Clamp(length / 3000f * diff * 0.08f, 0f, 0.15f);
 
         return new TrackModule
         {
@@ -105,9 +105,9 @@ public class ProceduralModuleFactory
     public TrackModule GenerateRamp(float precedingDrop, float precedingLength,
                                      float distance, TerrainType terrain, bool withJump)
     {
-        // Ramp length: 15-30% of the preceding descent length
-        float lengthRatio = _rng.RandfRange(0.15f, 0.30f);
-        float length = Mathf.Clamp(precedingLength * lengthRatio, 200f, 600f);
+        // Ramp length: 20-40% of the preceding descent length
+        float lengthRatio = _rng.RandfRange(0.20f, 0.40f);
+        float length = Mathf.Clamp(precedingLength * lengthRatio, 400f, 1200f);
 
         // Rise: fraction of preceding drop (ensures net downhill)
         float riseRatio = Mathf.Lerp(
@@ -115,9 +115,9 @@ public class ProceduralModuleFactory
             _difficulty.RampRiseToDropRatioMax,
             Mathf.Clamp(distance / 20000f, 0f, 1f)
         );
-        float riseVariance = _rng.RandfRange(0.8f, 1.2f);
+        float riseVariance = _rng.RandfRange(0.85f, 1.25f);
         float rise = Mathf.Abs(precedingDrop) * riseRatio * riseVariance;
-        rise = Mathf.Clamp(rise, 80f, 500f);
+        rise = Mathf.Clamp(rise, 150f, 800f);
 
         // Gap width computed dynamically from preceding descent
         float gapWidth = 0f;
@@ -152,7 +152,7 @@ public class ProceduralModuleFactory
         float gentleDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.15f;
         gentleDrop = Mathf.Clamp(gentleDrop, 10f, 80f);
 
-        float obsDensity = _rng.RandfRange(0.3f, 0.6f);
+        float obsDensity = _rng.RandfRange(0.05f, 0.15f);
 
         return new TrackModule
         {
@@ -180,7 +180,7 @@ public class ProceduralModuleFactory
         float drop = Mathf.Clamp(guidedDrop, 30f, 200f);
         float rise = _rng.RandfRange(80f, 220f);
 
-        float obsDensity = _rng.RandfRange(0.2f, 0.4f);
+        float obsDensity = _rng.RandfRange(0.05f, 0.1f);
 
         return new TrackModule
         {
@@ -204,7 +204,7 @@ public class ProceduralModuleFactory
     /// </summary>
     public float ComputeGapWidth(float descentDrop, float descentLength, float distance)
     {
-        const float baseGap = 180f;
+        const float baseGap = 280f;
         const float referenceDrop = 600f;
 
         float dropRatio = Mathf.Abs(descentDrop) / referenceDrop;
@@ -212,7 +212,7 @@ public class ProceduralModuleFactory
 
         float gapMultiplier = _difficulty.GetGapMultiplier(distance);
         float gap = gapFromDrop * gapMultiplier;
-        return Mathf.Clamp(gap, 120f, 500f);
+        return Mathf.Clamp(gap, 200f, 800f);
     }
 
     private static string[] GetObstacleTypes(TerrainType terrain) => terrain switch

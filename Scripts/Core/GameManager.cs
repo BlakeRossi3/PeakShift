@@ -1,5 +1,6 @@
 using Godot;
 using PeakShift.Core;
+using PeakShift.Hazards;
 using PeakShift.UI;
 
 namespace PeakShift;
@@ -46,6 +47,7 @@ public partial class GameManager : Node
 	private MainMenuController _mainMenu;
 	private GameOverController _gameOver;
 	private PauseMenuController _pauseMenu;
+	private AvalancheWall _avalancheWall;
 
 	// ── Lifecycle ────────────────────────────────────────────────
 
@@ -63,6 +65,7 @@ public partial class GameManager : Node
 		_mainMenu = GetNodeOrNull<MainMenuController>("../MainMenu");
 		_gameOver = GetNodeOrNull<GameOverController>("../GameOver");
 		_pauseMenu = GetNodeOrNull<PauseMenuController>("../PauseMenu");
+		_avalancheWall = GetNodeOrNull<AvalancheWall>("../AvalancheWall");
 
 		// Give TerrainManager a reference to the player
 		if (_terrainManager != null && _player != null)
@@ -80,6 +83,13 @@ public partial class GameManager : Node
 		if (_hud != null && _terrainManager != null)
 		{
 			_hud.TerrainRef = _terrainManager;
+		}
+
+		// Give AvalancheWall references to player and terrain
+		if (_avalancheWall != null)
+		{
+			if (_player != null) _avalancheWall.PlayerRef = _player;
+			if (_terrainManager != null) _avalancheWall.TerrainRef = _terrainManager;
 		}
 
 		ConnectSignals();
@@ -125,6 +135,10 @@ public partial class GameManager : Node
 		if (_player != null)
 			_player.PlayerCrashed += EndGame;
 
+		// AvalancheWall → GameManager end game
+		if (_avalancheWall != null)
+			_avalancheWall.AvalancheCaughtPlayer += EndGame;
+
 		// RunManager → HUD (score updates)
 		if (_runManager != null && _hud != null)
 		{
@@ -162,6 +176,7 @@ public partial class GameManager : Node
 		if (_gameOver != null) _gameOver.Visible = false;
 		if (_pauseMenu != null) _pauseMenu.Visible = false;
 
+		_avalancheWall?.Activate();
 		_audioManager?.PlayMusic();
 	}
 
@@ -172,6 +187,7 @@ public partial class GameManager : Node
 			_gameOver.ShowScore(_runManager.Score);
 		}
 		if (_hud != null) _hud.Visible = false;
+		_avalancheWall?.Deactivate();
 		_audioManager?.StopMusic();
 	}
 

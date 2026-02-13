@@ -27,10 +27,10 @@ public class DifficultyProfile
     // ── Terrain switching ────────────────────────────────────────
 
     /// <summary>Maximum same-type modules in a row at the start.</summary>
-    public int MaxSameTerrainEarly { get; set; } = 5;
+    public int MaxSameTerrainEarly { get; set; } = 8;
 
     /// <summary>Maximum same-type modules in a row at high difficulty.</summary>
-    public int MaxSameTerrainLate { get; set; } = 2;
+    public int MaxSameTerrainLate { get; set; } = 4;
 
     /// <summary>Distance at which switching becomes most aggressive.</summary>
     public float MaxSwitchFrequencyDistance { get; set; } = 12000f;
@@ -62,10 +62,10 @@ public class DifficultyProfile
     // Early run is gentle, late run is steep.
 
     /// <summary>Guidance slope angle at the start of the run (degrees).</summary>
-    public float GuidanceSlopeAngleEarly { get; set; } = 5f;
+    public float GuidanceSlopeAngleEarly { get; set; } = 12f;
 
     /// <summary>Guidance slope angle at maximum difficulty (degrees).</summary>
-    public float GuidanceSlopeAngleLate { get; set; } = 18f;
+    public float GuidanceSlopeAngleLate { get; set; } = 25f;
 
     /// <summary>Distance at which guidance slope reaches maximum angle (px).</summary>
     public float GuidanceSlopeRampDistance { get; set; } = 25000f;
@@ -79,22 +79,22 @@ public class DifficultyProfile
     public float DescentDropVarianceMax { get; set; } = 1.5f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (early).</summary>
-    public float RampRiseToDropRatio { get; set; } = 0.35f;
+    public float RampRiseToDropRatio { get; set; } = 0.45f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (late).</summary>
-    public float RampRiseToDropRatioMax { get; set; } = 0.50f;
+    public float RampRiseToDropRatioMax { get; set; } = 0.60f;
 
     /// <summary>Flat breather probability per generation cycle.</summary>
-    public float FlatBreatherChance { get; set; } = 0.12f;
+    public float FlatBreatherChance { get; set; } = 0.05f;
 
     /// <summary>Bump/roller probability per generation cycle.</summary>
-    public float BumpRollerChance { get; set; } = 0.15f;
+    public float BumpRollerChance { get; set; } = 0.06f;
 
     /// <summary>Chance of skipping the ramp (descent flows into next descent).</summary>
-    public float SkipRampChance { get; set; } = 0.10f;
+    public float SkipRampChance { get; set; } = 0.08f;
 
     /// <summary>Chance of a double-descent (two descents back to back before a ramp).</summary>
-    public float DoubleDescentChance { get; set; } = 0.08f;
+    public float DoubleDescentChance { get; set; } = 0.12f;
 
     // ── Query methods ────────────────────────────────────────────
 

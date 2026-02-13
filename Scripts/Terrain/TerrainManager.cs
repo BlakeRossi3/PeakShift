@@ -27,10 +27,10 @@ public partial class TerrainManager : Node2D
     // ── Exports ──────────────────────────────────────────────────
 
     [Export]
-    public int ChunksAhead { get; set; } = 10;
+    public int ChunksAhead { get; set; } = 30;
 
     [Export]
-    public float DespawnDistance { get; set; } = 2000f;
+    public float DespawnDistance { get; set; } = 5000f;
 
     [Export]
     public int PreviewModuleCount { get; set; } = 10;
@@ -127,7 +127,7 @@ public partial class TerrainManager : Node2D
         _difficulty = new DifficultyProfile();
         _generator = new ModuleTrackGenerator(_catalog, _difficulty)
         {
-            LookaheadModules = 12,
+            LookaheadModules = 30,
             DespawnBehind = DespawnDistance
         };
         _pool = new ModulePool(this, PoolPrewarmCount);
@@ -441,38 +441,27 @@ public partial class TerrainManager : Node2D
             };
         }
 
-        // Calculate number of obstacles to spawn based on density
-        // Base: ~1 obstacle per 500 pixels at max density
-        int baseCount = Mathf.Max(1, (int)(chunkWidth / 500f));
-        int obstacleCount = Mathf.Max(1, (int)(baseCount * module.Template.ObstacleDensity));
+        // Probability-based spawning: each chunk rolls against density.
+        // With density ~0.1 and ~8 chunks per module, yields 0-2 obstacles per module.
+        if (GD.Randf() > module.Template.ObstacleDensity) return;
 
-        for (int i = 0; i < obstacleCount; i++)
+        // Spawn exactly 1 obstacle in this chunk
+        float localX = GD.Randf() * chunkWidth;
+        float worldX = chunkWorldX + localX;
+        float terrainY = module.HeightAt(worldX);
+
+        string obstacleType = allowedTypes[(int)(GD.Randf() * allowedTypes.Length)];
+        var obstacle = _obstaclePool.Acquire(obstacleType);
+        if (obstacle == null) return;
+
+        Vector2 spawnPos = new Vector2(worldX, terrainY - 16f);
+        obstacle.Activate(spawnPos, terrainType);
+
+        _activeObstacles.Add(new ObstacleInstance
         {
-            // Random position within chunk
-            float localX = GD.Randf() * chunkWidth;
-            float worldX = chunkWorldX + localX;
-
-            // Get terrain height at this position
-            float terrainY = module.HeightAt(worldX);
-
-            // Random obstacle type from allowed types
-            string obstacleType = allowedTypes[(int)(GD.Randf() * allowedTypes.Length)];
-
-            // Acquire from pool
-            var obstacle = _obstaclePool.Acquire(obstacleType);
-            if (obstacle == null) continue;
-
-            // Activate at position (slightly above terrain surface)
-            Vector2 spawnPos = new Vector2(worldX, terrainY - 16f);
-            obstacle.Activate(spawnPos, terrainType);
-
-            // Track active obstacle
-            _activeObstacles.Add(new ObstacleInstance
-            {
-                Obstacle = obstacle,
-                WorldX = worldX
-            });
-        }
+            Obstacle = obstacle,
+            WorldX = worldX
+        });
     }
 
     // ── Recycling ───────────────────────────────────────────────
