@@ -1,10 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://bq5vq1u4ls22w"]
+[gd_scene load_steps=2 format=3 uid="uid://bq5vq1u4ls22w"]
 
 [ext_resource type="Script" uid="uid://d38k4v0y8w3ei" path="res://Scripts/Vehicles/SkiController.cs" id="1"]
-[ext_resource type="Texture2D" path="res://Assets/Art/Vehicles/skis_placeholder.png" id="2"]
 
 [node name="Skis" type="Node2D"]
 script = ExtResource("1")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-texture = ExtResource("2")

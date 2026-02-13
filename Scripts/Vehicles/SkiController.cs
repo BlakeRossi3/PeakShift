@@ -22,8 +22,8 @@ public partial class SkiController : VehicleBase
 
     // ── Physics Properties ───────────────────────────────────────────
 
-    /// <summary>Very light — extended airtime, floaty jumps.</summary>
-    public override float GravityMultiplier => 0.5f;
+    /// <summary>Light — slightly extended airtime but still responsive.</summary>
+    public override float GravityMultiplier => 0.85f;
 
     /// <summary>Very aerodynamic — minimal drag.</summary>
     public override float DragModifier => 0.55f;

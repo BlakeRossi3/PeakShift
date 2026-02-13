@@ -19,13 +19,13 @@ public static class PhysicsConstants
 
     // ── Drag & Resistance ────────────────────────────────────────────
     /// <summary>Base aerodynamic drag coefficient. Applied as: drag = coeff * v^2.</summary>
-    public const float BaseDragCoefficient = 0.0004f;
+    public const float BaseDragCoefficient = 0.00025f;
 
     /// <summary>Rolling resistance (constant force opposing motion, px/s^2).</summary>
     public const float BaseRollingResistance = 8f;
 
     /// <summary>Air drag while airborne (much lower than ground drag).</summary>
-    public const float AirDragCoefficient = 0.00008f;
+    public const float AirDragCoefficient = 0.00005f;
 
     // ── Speed Limits ─────────────────────────────────────────────────
     /// <summary>Absolute minimum speed — player always moves forward at least this fast (px/s).</summary>
@@ -106,7 +106,7 @@ public static class PhysicsConstants
     public const float LaunchAngleScale = 1.0f;
 
     /// <summary>How far below the terrain surface (px) before fall death triggers.</summary>
-    public const float FallDeathBelowTerrain = 800f;
+    public const float FallDeathBelowTerrain = 600f;
 
     // ── Terrain Hugging & Centripetal Launch ─────────────────────────
     /// <summary>
@@ -123,7 +123,7 @@ public static class PhysicsConstants
     /// Lower = player launches more easily from convex crests.
     /// At 0.7, the player detaches when centripetal force reaches 70% of gravity.
     /// </summary>
-    public const float LaunchCentripetalScale = 0.7f;
+    public const float LaunchCentripetalScale = 1.0f;
 
     // ── Flip Mechanics ───────────────────────────────────────────────
     /// <summary>Base angular velocity for flips (radians/s). Scales with speed.</summary>
@@ -148,10 +148,13 @@ public static class PhysicsConstants
     public const float FlipSuccessDragMultiplier = 0.5f;
 
     /// <summary>Upward velocity impulse applied when initiating a flip (px/s). Acts like an air-jump.</summary>
-    public const float FlipLaunchImpulse = -600f;
+    public const float FlipLaunchImpulse = -400f;
 
     /// <summary>Gravity multiplier during flip (lower = floatier, more air time for tricks).</summary>
-    public const float FlipGravityMultiplier = 0.6f;
+    public const float FlipGravityMultiplier = 0.85f;
+
+    /// <summary>Upward velocity impulse on successful flip landing — creates a bounce arc (px/s).</summary>
+    public const float FlipBounceImpulse = 250f;
 
     // ── Jump Clearance ─────────────────────────────────────────────
     // These parameters govern the "must-clear-the-gap" momentum rule.

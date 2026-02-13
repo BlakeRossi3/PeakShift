@@ -38,10 +38,10 @@ public class DifficultyProfile
     // ── Slope scaling ────────────────────────────────────────────
 
     /// <summary>Base drop multiplier at start of run.</summary>
-    public float BaseDropMultiplier { get; set; } = 1.0f;
+    public float BaseDropMultiplier { get; set; } = 1.2f;
 
     /// <summary>Drop multiplier at maximum difficulty.</summary>
-    public float MaxDropMultiplier { get; set; } = 1.6f;
+    public float MaxDropMultiplier { get; set; } = 2.0f;
 
     /// <summary>Distance at which drop multiplier is fully ramped.</summary>
     public float DropRampDistance { get; set; } = 20000f;
@@ -49,10 +49,10 @@ public class DifficultyProfile
     // ── Gap scaling ──────────────────────────────────────────────
 
     /// <summary>Gap width multiplier at start.</summary>
-    public float BaseGapMultiplier { get; set; } = 0.8f;
+    public float BaseGapMultiplier { get; set; } = 1.0f;
 
     /// <summary>Gap width multiplier at maximum difficulty.</summary>
-    public float MaxGapMultiplier { get; set; } = 1.4f;
+    public float MaxGapMultiplier { get; set; } = 1.8f;
 
     /// <summary>Distance at which gap multiplier is fully ramped.</summary>
     public float GapRampDistance { get; set; } = 18000f;
@@ -62,10 +62,10 @@ public class DifficultyProfile
     // Early run is gentle, late run is steep.
 
     /// <summary>Guidance slope angle at the start of the run (degrees).</summary>
-    public float GuidanceSlopeAngleEarly { get; set; } = 12f;
+    public float GuidanceSlopeAngleEarly { get; set; } = 18f;
 
     /// <summary>Guidance slope angle at maximum difficulty (degrees).</summary>
-    public float GuidanceSlopeAngleLate { get; set; } = 25f;
+    public float GuidanceSlopeAngleLate { get; set; } = 35f;
 
     /// <summary>Distance at which guidance slope reaches maximum angle (px).</summary>
     public float GuidanceSlopeRampDistance { get; set; } = 25000f;
@@ -73,16 +73,16 @@ public class DifficultyProfile
     // ── Procedural Variety Controls ──────────────────────────────
 
     /// <summary>Minimum variance around the guidance slope for descent drop.</summary>
-    public float DescentDropVarianceMin { get; set; } = 0.6f;
+    public float DescentDropVarianceMin { get; set; } = 0.7f;
 
     /// <summary>Maximum variance around the guidance slope for descent drop.</summary>
-    public float DescentDropVarianceMax { get; set; } = 1.5f;
+    public float DescentDropVarianceMax { get; set; } = 1.6f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (early).</summary>
-    public float RampRiseToDropRatio { get; set; } = 0.45f;
+    public float RampRiseToDropRatio { get; set; } = 0.55f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (late).</summary>
-    public float RampRiseToDropRatioMax { get; set; } = 0.60f;
+    public float RampRiseToDropRatioMax { get; set; } = 0.75f;
 
     /// <summary>Flat breather probability per generation cycle.</summary>
     public float FlatBreatherChance { get; set; } = 0.05f;

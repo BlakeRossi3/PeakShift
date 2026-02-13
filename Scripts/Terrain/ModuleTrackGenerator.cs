@@ -76,11 +76,11 @@ public class ModuleTrackGenerator
 
     // ── Intro run parameters ─────────────────────────────────────
 
-    private const float IntroDescentLength = 6000f;
-    private const float IntroDescentDrop = 10000f;
+    private const float IntroDescentLength = 3000f;
+    private const float IntroDescentDrop = 7000f;
     private const float IntroRampLength = 800f;
-    private const float IntroRampRise = 550f;
-    private const float IntroGapWidth = 400f;
+    private const float IntroRampRise = 400f;
+    private const float IntroGapWidth = 650f;
 
     // ── Wave generation state ────────────────────────────────────
 

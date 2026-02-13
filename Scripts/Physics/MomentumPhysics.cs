@@ -116,6 +116,21 @@ public static class MomentumPhysics
     }
 
     /// <summary>
+    /// Projects the full air velocity vector onto the landing slope tangent.
+    /// Preserves kinetic energy from steep dives into downhill slopes instead
+    /// of discarding the vertical component.
+    /// </summary>
+    public static float ProjectLandingSpeed(Vector2 airVelocity, Vector2 floorNormal)
+    {
+        Vector2 tangent = new Vector2(floorNormal.Y, -floorNormal.X);
+        if (tangent.X < 0f)
+            tangent = -tangent;
+
+        float projected = airVelocity.Dot(tangent);
+        return Mathf.Max(projected, PhysicsConstants.MinimumSpeed);
+    }
+
+    /// <summary>
     /// Computes airborne position delta for a single frame.
     ///
     /// x(t) = v_x * dt
