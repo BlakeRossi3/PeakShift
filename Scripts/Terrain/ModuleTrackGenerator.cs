@@ -78,8 +78,8 @@ public class ModuleTrackGenerator
 
     private const float IntroDescentLength = 3000f;
     private const float IntroDescentDrop = 7000f;
-    private const float IntroRampLength = 800f;
-    private const float IntroRampRise = 400f;
+    private const float IntroRampLength = 1400f;
+    private const float IntroRampRise = 300f;
     private const float IntroGapWidth = 650f;
 
     // ── Wave generation state ────────────────────────────────────
@@ -316,6 +316,21 @@ public class ModuleTrackGenerator
         _lastDescentDrop = IntroDescentDrop;
         _lastDescentLength = IntroDescentLength;
 
+        // Flat approach before the intro ramp so the player settles on the ground
+        var introApproach = new TrackModule
+        {
+            Shape = TrackModule.ModuleShape.Flat,
+            EntryTerrain = TerrainType.Snow,
+            ExitTerrain = TerrainType.Snow,
+            Length = 800f,
+            Drop = 40f,
+            Rise = 0f,
+            Difficulty = 1,
+            HasJump = false,
+            ObstacleDensity = 0f
+        };
+        PlaceModule(introApproach);
+
         // Intro ramp with jump
         var introRamp = new TrackModule
         {
@@ -330,7 +345,7 @@ public class ModuleTrackGenerator
         };
         PlaceModule(introRamp);
 
-        _sameTerrainCount = 2;
+        _sameTerrainCount = 3;
         _currentPhase = WavePhase.PostGap;
     }
 
@@ -430,6 +445,11 @@ public class ModuleTrackGenerator
 
     private void GenerateRampPhase()
     {
+        // Always place a flat approach before the ramp so the player can
+        // settle on the ground after the descent and build stable momentum.
+        var approach = _factory.GenerateApproach(_totalDistance, _currentTerrain);
+        PlaceModule(approach);
+
         // Decide if this ramp has a jump
         bool shouldJump = _modulesSinceLastJump >= 2;
         bool withJump = shouldJump || _rng.Randf() < 0.4f;

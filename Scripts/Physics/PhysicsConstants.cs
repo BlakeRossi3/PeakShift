@@ -63,7 +63,7 @@ public static class PhysicsConstants
     /// Extra ground snap distance (px) when tucking. Adds to GroundSnapDistance
     /// so the player sticks through bigger bumps while tucked.
     /// </summary>
-    public const float TuckExtraSnapDistance = 40f;
+    public const float TuckExtraSnapDistance = 50f;
 
     /// <summary>
     /// Downward velocity applied each frame while grounded-tucking to counteract
@@ -113,7 +113,7 @@ public static class PhysicsConstants
     /// Max distance (px) the player can be from the terrain surface and still snap back.
     /// Keeps the player glued over small bumps and undulations.
     /// </summary>
-    public const float GroundSnapDistance = 50f;
+    public const float GroundSnapDistance = 80f;
 
     /// <summary>Sampling delta (px) for computing terrain curvature via finite differences.</summary>
     public const float CurvatureSampleDelta = 16f;

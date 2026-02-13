@@ -38,10 +38,10 @@ public class DifficultyProfile
     // ── Slope scaling ────────────────────────────────────────────
 
     /// <summary>Base drop multiplier at start of run.</summary>
-    public float BaseDropMultiplier { get; set; } = 1.2f;
+    public float BaseDropMultiplier { get; set; } = 1.0f;
 
     /// <summary>Drop multiplier at maximum difficulty.</summary>
-    public float MaxDropMultiplier { get; set; } = 2.0f;
+    public float MaxDropMultiplier { get; set; } = 1.6f;
 
     /// <summary>Distance at which drop multiplier is fully ramped.</summary>
     public float DropRampDistance { get; set; } = 20000f;
@@ -79,16 +79,16 @@ public class DifficultyProfile
     public float DescentDropVarianceMax { get; set; } = 1.6f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (early).</summary>
-    public float RampRiseToDropRatio { get; set; } = 0.55f;
+    public float RampRiseToDropRatio { get; set; } = 0.30f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (late).</summary>
-    public float RampRiseToDropRatioMax { get; set; } = 0.75f;
+    public float RampRiseToDropRatioMax { get; set; } = 0.45f;
 
     /// <summary>Flat breather probability per generation cycle.</summary>
-    public float FlatBreatherChance { get; set; } = 0.05f;
+    public float FlatBreatherChance { get; set; } = 0.15f;
 
     /// <summary>Bump/roller probability per generation cycle.</summary>
-    public float BumpRollerChance { get; set; } = 0.06f;
+    public float BumpRollerChance { get; set; } = 0.10f;
 
     /// <summary>Chance of skipping the ramp (descent flows into next descent).</summary>
     public float SkipRampChance { get; set; } = 0.08f;

@@ -105,9 +105,9 @@ public class ProceduralModuleFactory
     public TrackModule GenerateRamp(float precedingDrop, float precedingLength,
                                      float distance, TerrainType terrain, bool withJump)
     {
-        // Ramp length: 25-45% of the preceding descent length
-        float lengthRatio = _rng.RandfRange(0.25f, 0.45f);
-        float length = Mathf.Clamp(precedingLength * lengthRatio, 500f, 1800f);
+        // Ramp length: 40-65% of the preceding descent length (longer = gentler approach)
+        float lengthRatio = _rng.RandfRange(0.40f, 0.65f);
+        float length = Mathf.Clamp(precedingLength * lengthRatio, 900f, 3000f);
 
         // Rise: fraction of preceding drop (ensures net downhill)
         float riseRatio = Mathf.Lerp(
@@ -115,9 +115,9 @@ public class ProceduralModuleFactory
             _difficulty.RampRiseToDropRatioMax,
             Mathf.Clamp(distance / 20000f, 0f, 1f)
         );
-        float riseVariance = _rng.RandfRange(0.85f, 1.25f);
+        float riseVariance = _rng.RandfRange(0.85f, 1.15f);
         float rise = Mathf.Abs(precedingDrop) * riseRatio * riseVariance;
-        rise = Mathf.Clamp(rise, 200f, 1200f);
+        rise = Mathf.Clamp(rise, 150f, 700f);
 
         // Gap width computed dynamically from preceding descent
         float gapWidth = 0f;
@@ -138,6 +138,33 @@ public class ProceduralModuleFactory
             Weight = 1.0f,
             HasJump = withJump,
             GapWidth = gapWidth,
+            ObstacleDensity = 0f
+        };
+    }
+
+    /// <summary>
+    /// Generate a flat approach segment placed before ramps.
+    /// Gives the player time to settle on the ground and build stable momentum
+    /// before hitting the uphill ramp, preventing mid-descent launches.
+    /// </summary>
+    public TrackModule GenerateApproach(float distance, TerrainType terrain)
+    {
+        float length = _rng.RandfRange(600f, 1200f);
+        // Very gentle slope following guidance angle at 20% — nearly flat
+        float gentleDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.20f;
+        gentleDrop = Mathf.Clamp(gentleDrop, 15f, 120f);
+
+        return new TrackModule
+        {
+            Shape = TrackModule.ModuleShape.Flat,
+            EntryTerrain = terrain,
+            ExitTerrain = terrain,
+            Length = length,
+            Drop = gentleDrop,
+            Rise = 0f,
+            Difficulty = 1,
+            Weight = 1.0f,
+            HasJump = false,
             ObstacleDensity = 0f
         };
     }

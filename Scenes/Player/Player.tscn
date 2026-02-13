@@ -6,17 +6,17 @@
 [ext_resource type="Script" uid="uid://d38k4v0y8w3ei" path="res://Scripts/Vehicles/SkiController.cs" id="5"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
-size = Vector2(32, 64)
+size = Vector2(64, 128)
 
 [node name="Player" type="CharacterBody2D"]
 floor_stop_on_slope = false
 floor_constant_speed = true
-floor_snap_length = 16.0
+floor_snap_length = 32.0
 script = ExtResource("1")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 position = Vector2(-0.25, 0.25)
-scale = Vector2(0.15, 0.15)
+scale = Vector2(0.3, 0.3)
 texture = ExtResource("2_biker")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
