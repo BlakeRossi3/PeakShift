@@ -62,10 +62,10 @@ public class DifficultyProfile
     // Early run is gentle, late run is steep.
 
     /// <summary>Guidance slope angle at the start of the run (degrees).</summary>
-    public float GuidanceSlopeAngleEarly { get; set; } = 18f;
+    public float GuidanceSlopeAngleEarly { get; set; } = 8f;
 
     /// <summary>Guidance slope angle at maximum difficulty (degrees).</summary>
-    public float GuidanceSlopeAngleLate { get; set; } = 35f;
+    public float GuidanceSlopeAngleLate { get; set; } = 16f;
 
     /// <summary>Distance at which guidance slope reaches maximum angle (px).</summary>
     public float GuidanceSlopeRampDistance { get; set; } = 25000f;
@@ -79,10 +79,10 @@ public class DifficultyProfile
     public float DescentDropVarianceMax { get; set; } = 1.6f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (early).</summary>
-    public float RampRiseToDropRatio { get; set; } = 0.30f;
+    public float RampRiseToDropRatio { get; set; } = 0.45f;
 
     /// <summary>Ramp rise as a fraction of the preceding descent's drop (late).</summary>
-    public float RampRiseToDropRatioMax { get; set; } = 0.45f;
+    public float RampRiseToDropRatioMax { get; set; } = 0.65f;
 
     /// <summary>Flat breather probability per generation cycle.</summary>
     public float FlatBreatherChance { get; set; } = 0.15f;
@@ -91,10 +91,13 @@ public class DifficultyProfile
     public float BumpRollerChance { get; set; } = 0.10f;
 
     /// <summary>Chance of skipping the ramp (descent flows into next descent).</summary>
-    public float SkipRampChance { get; set; } = 0.08f;
+    public float SkipRampChance { get; set; } = 0.04f;
 
     /// <summary>Chance of a double-descent (two descents back to back before a ramp).</summary>
-    public float DoubleDescentChance { get; set; } = 0.12f;
+    public float DoubleDescentChance { get; set; } = 0.05f;
+
+    /// <summary>Rolling hills probability per generation cycle (placed after gaps).</summary>
+    public float RollingHillsChance { get; set; } = 0.30f;
 
     // ── Query methods ────────────────────────────────────────────
 

@@ -76,15 +76,15 @@ public class ModuleTrackGenerator
 
     // ── Intro run parameters ─────────────────────────────────────
 
-    private const float IntroDescentLength = 3000f;
-    private const float IntroDescentDrop = 7000f;
-    private const float IntroRampLength = 1400f;
-    private const float IntroRampRise = 300f;
-    private const float IntroGapWidth = 650f;
+    private const float IntroDescentLength = 5000f;
+    private const float IntroDescentDrop = 10000f;
+    private const float IntroRampLength = 2000f;
+    private const float IntroRampRise = 1000f;
+    private const float IntroGapWidth = 1000f;
 
     // ── Wave generation state ────────────────────────────────────
 
-    private enum WavePhase { Descent, VarietyInjection, Ramp, PostGap }
+    private enum WavePhase { PostGap, Descent, Ramp }
 
     private readonly List<PlacedModule> _placed = new();
     private float _nextModuleX;
@@ -135,7 +135,7 @@ public class ModuleTrackGenerator
         _currentTerrain = TerrainType.Snow;
         _modulesSinceLastJump = 0;
         _totalDistance = 0f;
-        _currentPhase = WavePhase.Descent;
+        _currentPhase = WavePhase.PostGap;
         _lastDescentDrop = 0f;
         _lastDescentLength = 0f;
 
@@ -316,21 +316,6 @@ public class ModuleTrackGenerator
         _lastDescentDrop = IntroDescentDrop;
         _lastDescentLength = IntroDescentLength;
 
-        // Flat approach before the intro ramp so the player settles on the ground
-        var introApproach = new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Flat,
-            EntryTerrain = TerrainType.Snow,
-            ExitTerrain = TerrainType.Snow,
-            Length = 800f,
-            Drop = 40f,
-            Rise = 0f,
-            Difficulty = 1,
-            HasJump = false,
-            ObstacleDensity = 0f
-        };
-        PlaceModule(introApproach);
-
         // Intro ramp with jump
         var introRamp = new TrackModule
         {
@@ -345,7 +330,7 @@ public class ModuleTrackGenerator
         };
         PlaceModule(introRamp);
 
-        _sameTerrainCount = 3;
+        _sameTerrainCount = 2;
         _currentPhase = WavePhase.PostGap;
     }
 
@@ -356,33 +341,68 @@ public class ModuleTrackGenerator
         int maxSameRun = _difficulty.GetMaxSameTerrainRun(_totalDistance);
         bool mustSwitch = _sameTerrainCount >= maxSameRun;
 
-        // Terrain transition takes priority — insert between waves
+        // Terrain transition — no ramp shapes when in PostGap (first-after-gap rule)
         if (mustSwitch && (_currentPhase == WavePhase.Descent || _currentPhase == WavePhase.PostGap))
         {
             int maxDiff = _difficulty.GetMaxDifficulty(_totalDistance);
-            PlaceModule(SelectTransitionModule(maxDiff));
+            bool allowRampShape = _currentPhase != WavePhase.PostGap;
+            PlaceModule(SelectTransitionModule(maxDiff, allowRampShape));
             _currentPhase = WavePhase.Descent;
             return;
         }
 
         switch (_currentPhase)
         {
+            case WavePhase.PostGap:
+                GeneratePostGapPhase();
+                break;
             case WavePhase.Descent:
                 GenerateDescentPhase();
-                break;
-            case WavePhase.VarietyInjection:
-                GenerateVarietyPhase();
                 break;
             case WavePhase.Ramp:
                 GenerateRampPhase();
                 break;
-            case WavePhase.PostGap:
-                _currentPhase = WavePhase.Descent;
-                GenerateDescentPhase();
-                break;
         }
     }
 
+    /// <summary>
+    /// PostGap: place variety (rolling hills, flat, bump) or go straight to descent.
+    /// Never places a ramp — ensures "first section after a gap is never a ramp."
+    /// </summary>
+    private void GeneratePostGapPhase()
+    {
+        float roll = _rng.Randf();
+        float rollingChance = _difficulty.RollingHillsChance;
+        float flatChance = _difficulty.FlatBreatherChance;
+        float bumpChance = _difficulty.BumpRollerChance;
+
+        if (roll < rollingChance)
+        {
+            PlaceModule(_factory.GenerateRollingHills(_totalDistance, _currentTerrain));
+            _currentPhase = WavePhase.Descent;
+        }
+        else if (roll < rollingChance + flatChance)
+        {
+            PlaceModule(_factory.GenerateFlat(_totalDistance, _currentTerrain));
+            _currentPhase = WavePhase.Descent;
+        }
+        else if (roll < rollingChance + flatChance + bumpChance)
+        {
+            PlaceModule(_factory.GenerateBump(_totalDistance, _currentTerrain));
+            _currentPhase = WavePhase.Descent;
+        }
+        else
+        {
+            // No variety — go straight to descent
+            _currentPhase = WavePhase.Descent;
+            GenerateDescentPhase();
+        }
+    }
+
+    /// <summary>
+    /// Descent: always places a descent module.
+    /// Ensures "the section before every ramp has some sort of downhill."
+    /// </summary>
     private void GenerateDescentPhase()
     {
         string flavor = PickDescentFlavor();
@@ -392,10 +412,9 @@ public class ModuleTrackGenerator
         _lastDescentDrop = descent.Drop;
         _lastDescentLength = descent.Length;
 
-        // Decide next phase
         float roll = _rng.Randf();
 
-        // Double descent? (two descents in a row)
+        // Double descent (small chance — two descents back to back)
         if (roll < _difficulty.DoubleDescentChance)
         {
             _currentPhase = WavePhase.Descent;
@@ -403,54 +422,22 @@ public class ModuleTrackGenerator
         }
         roll -= _difficulty.DoubleDescentChance;
 
-        // Skip ramp entirely? (descent flows into next descent)
+        // Skip ramp — no gap this cycle, start fresh
         if (roll < _difficulty.SkipRampChance)
         {
-            _currentPhase = WavePhase.Descent;
+            _currentPhase = WavePhase.PostGap;
             return;
-        }
-        roll -= _difficulty.SkipRampChance;
-
-        // Insert a variety piece before the ramp?
-        float varietyTotal = _difficulty.FlatBreatherChance + _difficulty.BumpRollerChance;
-        if (roll < varietyTotal)
-        {
-            _currentPhase = WavePhase.VarietyInjection;
-        }
-        else
-        {
-            _currentPhase = WavePhase.Ramp;
-        }
-    }
-
-    private void GenerateVarietyPhase()
-    {
-        float flatChance = _difficulty.FlatBreatherChance;
-        float bumpChance = _difficulty.BumpRollerChance;
-        float total = flatChance + bumpChance;
-
-        float roll = _rng.Randf() * total;
-
-        if (roll < flatChance)
-        {
-            PlaceModule(_factory.GenerateFlat(_totalDistance, _currentTerrain));
-        }
-        else
-        {
-            PlaceModule(_factory.GenerateBump(_totalDistance, _currentTerrain));
         }
 
         _currentPhase = WavePhase.Ramp;
     }
 
+    /// <summary>
+    /// Ramp: places a ramp with optional gap.
+    /// Ensures "last section before a gap is always a ramp."
+    /// </summary>
     private void GenerateRampPhase()
     {
-        // Always place a flat approach before the ramp so the player can
-        // settle on the ground after the descent and build stable momentum.
-        var approach = _factory.GenerateApproach(_totalDistance, _currentTerrain);
-        PlaceModule(approach);
-
-        // Decide if this ramp has a jump
         bool shouldJump = _modulesSinceLastJump >= 2;
         bool withJump = shouldJump || _rng.Randf() < 0.4f;
 
@@ -460,7 +447,7 @@ public class ModuleTrackGenerator
         );
         PlaceModule(ramp);
 
-        _currentPhase = withJump ? WavePhase.PostGap : WavePhase.Descent;
+        _currentPhase = WavePhase.PostGap;
     }
 
     private string PickDescentFlavor()
@@ -495,7 +482,7 @@ public class ModuleTrackGenerator
 
     // ── Internal: transition module selection ────────────────────
 
-    private TrackModule SelectTransitionModule(int maxDiff)
+    private TrackModule SelectTransitionModule(int maxDiff, bool allowRampShape = true)
     {
         // Pick a target terrain different from current
         var targets = new List<TerrainType>();
@@ -508,8 +495,12 @@ public class ModuleTrackGenerator
         var candidates = _catalog.QueryTransitions(_currentTerrain, targetTerrain);
         candidates.RemoveAll(m => m.Difficulty > maxDiff || m.MinDistance > _totalDistance);
 
-        // If a jump is overdue, prefer transition modules with jumps
-        if (_modulesSinceLastJump >= 3)
+        // Filter out ramp-shaped transitions when not allowed (e.g. right after a gap)
+        if (!allowRampShape)
+            candidates.RemoveAll(m => m.Shape == TrackModule.ModuleShape.Ramp);
+
+        // If a jump is overdue, prefer transition modules with jumps (only if ramps allowed)
+        if (_modulesSinceLastJump >= 3 && allowRampShape)
         {
             var jumpTransitions = candidates.FindAll(m => m.HasJump);
             if (jumpTransitions.Count > 0)

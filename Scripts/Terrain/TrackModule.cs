@@ -26,7 +26,8 @@ public partial class TrackModule : Resource
         Gap,
         Transition,
         Flat,
-        Bump  // Small roller: goes up then back down
+        Bump,  // Small roller: goes up then back down
+        RollingHills  // Multiple rolling hills for hill-to-hill jumping
     }
 
     /// <summary>The geometric shape of this module.</summary>
@@ -106,6 +107,11 @@ public partial class TrackModule : Resource
     [Export]
     public string[] AllowedObstacleTypes { get; set; } = System.Array.Empty<string>();
 
+    // ── Derived helpers ────────────────────────────────────────────
+
+    /// <summary>Number of hill periods for RollingHills shape (derived from Length).</summary>
+    private float RollingHillPeriods => Mathf.Max(2f, Mathf.Floor(Length / 3000f));
+
     // ── Connector transforms ─────────────────────────────────────
     // These are computed at spawn time based on placement context.
     // They define where this module begins and ends in world space.
@@ -123,6 +129,7 @@ public partial class TrackModule : Resource
             ModuleShape.Transition => entryY + Drop,
             ModuleShape.Flat => entryY + Drop,  // Drop should be ~0 or small
             ModuleShape.Bump => entryY + Drop,  // Bump: net drop (or rise if negative)
+            ModuleShape.RollingHills => entryY + Drop,
             _ => entryY
         };
     }
@@ -140,8 +147,9 @@ public partial class TrackModule : Resource
             // Cosine S-curve: flat → steep → flat
             ModuleShape.Descent => entryY + Drop * (1f - Mathf.Cos(t * Mathf.Pi)) / 2f,
 
-            // Cosine quarter-curve: flat at bottom → steep upward at lip
-            ModuleShape.Ramp => entryY - Rise * (1f - Mathf.Cos(t * Mathf.Pi / 2f)),
+            // Asymmetric ramp: flat start → still climbing at lip for upward launch
+            // Phase < 1.0 shifts peak steepness toward the lip (1.0 = original symmetric)
+            ModuleShape.Ramp => entryY - Rise * (1f - Mathf.Cos(t * 0.85f * Mathf.Pi)) / (1f - Mathf.Cos(0.85f * Mathf.Pi)),
 
             // Gap: no surface (return entry Y as reference for fall detection)
             ModuleShape.Gap => entryY,
@@ -155,6 +163,10 @@ public partial class TrackModule : Resource
             // Bump: single smooth roller (up then down) using sine wave
             // Rise = height of bump, Drop = net vertical change
             ModuleShape.Bump => entryY + Drop * t - Rise * Mathf.Sin(t * Mathf.Pi),
+
+            // Rolling hills: multiple sine periods for hill-to-hill jumping
+            // Crests give air, valleys give speed. Net downhill by Drop.
+            ModuleShape.RollingHills => entryY + Drop * t - Rise * Mathf.Sin(t * Mathf.Pi * 2f * RollingHillPeriods),
 
             _ => entryY
         };

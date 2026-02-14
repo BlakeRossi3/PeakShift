@@ -257,6 +257,26 @@ public partial class TerrainManager : Node2D
         return _generator.IsOverGap(worldX);
     }
 
+    /// <summary>
+    /// Returns the terrain surface tangent (travel direction) at a given world X.
+    /// Always points rightward (positive X).
+    /// </summary>
+    public Vector2 GetTerrainTangentAt(float worldX)
+    {
+        const float sampleDelta = 4f;
+        float yLeft = GetTerrainHeight(worldX - sampleDelta);
+        float yRight = GetTerrainHeight(worldX + sampleDelta);
+        return new Vector2(sampleDelta * 2f, yRight - yLeft).Normalized();
+    }
+
+    /// <summary>
+    /// Returns the terrain type at the given world X position.
+    /// </summary>
+    public TerrainType GetTerrainType(float worldX)
+    {
+        return _generator.GetTerrainTypeAt(worldX);
+    }
+
     // ── Chunk spawning (renders modules as terrain geometry) ─────
 
     public void SpawnNextChunk()
@@ -405,9 +425,7 @@ public partial class TerrainManager : Node2D
         line.DefaultColor = GetSurfaceColor(terrainType);
         body.AddChild(line);
 
-        // Physics collision
-        var collision = new CollisionPolygon2D { Polygon = polyPoints };
-        body.AddChild(collision);
+        // Physics collision removed — path-following uses math queries, not collision polygons
 
         ActiveChunks.Add(new ChunkInstance
         {

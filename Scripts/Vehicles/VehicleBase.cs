@@ -13,7 +13,7 @@ public abstract partial class VehicleBase : Node2D
 
     /// <summary>Maximum horizontal speed for this vehicle (px/s).</summary>
     [Export]
-    public float MaxSpeed { get; set; } = 800f;
+    public float MaxSpeed { get; set; } = 10000f;
 
     // ── Physics Modifiers ────────────────────────────────────────────
 
@@ -40,6 +40,12 @@ public abstract partial class VehicleBase : Node2D
     /// Heavier vehicles rotate slower.
     /// </summary>
     public abstract float FlipSpeedModifier { get; }
+
+    /// <summary>
+    /// Whether this vehicle can move backwards (negative speed).
+    /// Skis can slide backwards down hills; bikes always move forward.
+    /// </summary>
+    public virtual bool CanMoveBackwards => false;
 
     // ── Terrain Affinity ─────────────────────────────────────────────
 

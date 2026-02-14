@@ -39,26 +39,26 @@ public class ProceduralModuleFactory
         switch (flavor)
         {
             case "short_steep":
-                minLength = 1200f;
-                maxLength = 2800f;
+                minLength = 800f;
+                maxLength = 1800f;
                 slopeVarianceMin = 1.3f;
                 slopeVarianceMax = 2.2f;
                 break;
             case "long_gentle":
-                minLength = 5000f;
-                maxLength = 9000f;
+                minLength = 2500f;
+                maxLength = 4500f;
                 slopeVarianceMin = 0.5f;
                 slopeVarianceMax = 0.9f;
                 break;
             case "cruise":
-                minLength = 3500f;
-                maxLength = 6500f;
+                minLength = 2000f;
+                maxLength = 3500f;
                 slopeVarianceMin = 0.6f;
                 slopeVarianceMax = 0.8f;
                 break;
             default: // "normal"
-                minLength = 2000f;
-                maxLength = 5500f;
+                minLength = 1200f;
+                maxLength = 3000f;
                 slopeVarianceMin = _difficulty.DescentDropVarianceMin;
                 slopeVarianceMax = _difficulty.DescentDropVarianceMax;
                 break;
@@ -70,7 +70,7 @@ public class ProceduralModuleFactory
         float drop = guidedDrop * variance;
 
         // Clamp to reasonable bounds
-        drop = Mathf.Clamp(drop, 120f, 8000f);
+        drop = Mathf.Clamp(drop, 80f, 2500f);
 
         // Difficulty rating from steepness relative to guidance
         int diff = variance > 1.4f ? 3 : variance > 1.0f ? 2 : 1;
@@ -143,33 +143,6 @@ public class ProceduralModuleFactory
     }
 
     /// <summary>
-    /// Generate a flat approach segment placed before ramps.
-    /// Gives the player time to settle on the ground and build stable momentum
-    /// before hitting the uphill ramp, preventing mid-descent launches.
-    /// </summary>
-    public TrackModule GenerateApproach(float distance, TerrainType terrain)
-    {
-        float length = _rng.RandfRange(600f, 1200f);
-        // Very gentle slope following guidance angle at 20% — nearly flat
-        float gentleDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.20f;
-        gentleDrop = Mathf.Clamp(gentleDrop, 15f, 120f);
-
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Flat,
-            EntryTerrain = terrain,
-            ExitTerrain = terrain,
-            Length = length,
-            Drop = gentleDrop,
-            Rise = 0f,
-            Difficulty = 1,
-            Weight = 1.0f,
-            HasJump = false,
-            ObstacleDensity = 0f
-        };
-    }
-
-    /// <summary>
     /// Generate a Flat breather module.
     /// </summary>
     public TrackModule GenerateFlat(float distance, TerrainType terrain)
@@ -212,6 +185,36 @@ public class ProceduralModuleFactory
         return new TrackModule
         {
             Shape = TrackModule.ModuleShape.Bump,
+            EntryTerrain = terrain,
+            ExitTerrain = terrain,
+            Length = length,
+            Drop = drop,
+            Rise = rise,
+            Difficulty = Mathf.Min(2, _difficulty.GetMaxDifficulty(distance)),
+            Weight = 1.0f,
+            HasJump = false,
+            ObstacleDensity = obsDensity,
+            AllowedObstacleTypes = GetObstacleTypes(terrain)
+        };
+    }
+
+    /// <summary>
+    /// Generate a RollingHills module — multiple gentle hills for hill-to-hill jumping.
+    /// </summary>
+    public TrackModule GenerateRollingHills(float distance, TerrainType terrain)
+    {
+        float length = _rng.RandfRange(6000f, 8000f);
+        // Gentle net downhill — fraction of guidance slope
+        float guidedDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.35f;
+        float drop = Mathf.Clamp(guidedDrop, 30f, 250f);
+        // Hill amplitude — modest so crests give brief air, not extended flight
+        float rise = _rng.RandfRange(200f, 500f);
+
+        float obsDensity = _rng.RandfRange(0.03f, 0.08f);
+
+        return new TrackModule
+        {
+            Shape = TrackModule.ModuleShape.RollingHills,
             EntryTerrain = terrain,
             ExitTerrain = terrain,
             Length = length,

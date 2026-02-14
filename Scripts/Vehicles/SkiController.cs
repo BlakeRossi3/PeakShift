@@ -17,7 +17,7 @@ public partial class SkiController : VehicleBase
 
     public SkiController()
     {
-        MaxSpeed = 1600f;
+        MaxSpeed = 6000f;
     }
 
     // ── Physics Properties ───────────────────────────────────────────
@@ -36,30 +36,33 @@ public partial class SkiController : VehicleBase
 
     // ── Terrain Affinity ─────────────────────────────────────────────
 
+    /// <summary>Skis can slide backwards down hills.</summary>
+    public override bool CanMoveBackwards => true;
+
     /// <summary>
     /// Ski terrain bonuses:
     ///   Snow: +100 px/s^2 (excels — designed for snow)
-    ///   Dirt: -180 px/s^2 (struggles — skis catch on dirt)
+    ///   Dirt: -500 px/s^2 (barely moves — skis catch and scrape on dirt)
     ///   Ice:  +60 px/s^2 (good — low friction surface matches skis)
     /// </summary>
     public override float GetTerrainBonus(TerrainType terrain) => terrain switch
     {
-        TerrainType.Snow => 100f,
-        TerrainType.Dirt => -180f,
-        TerrainType.Ice => 60f,
+        TerrainType.Snow => 150f,
+        TerrainType.Dirt => -500f,
+        TerrainType.Ice => 100f,
         _ => 0f
     };
 
     /// <summary>
     /// Ski friction modifiers:
     ///   Snow: 0.6 (smooth glide)
-    ///   Dirt: 2.0 (high friction — skis scrape)
+    ///   Dirt: 5.0 (massive friction — skis scrape and dig in)
     ///   Ice:  0.4 (very low friction)
     /// </summary>
     public override float GetTerrainFrictionModifier(TerrainType terrain) => terrain switch
     {
         TerrainType.Snow => 0.6f,
-        TerrainType.Dirt => 2.0f,
+        TerrainType.Dirt => 5.0f,
         TerrainType.Ice => 0.4f,
         _ => 1.0f
     };
@@ -67,13 +70,13 @@ public partial class SkiController : VehicleBase
     /// <summary>
     /// Ski drag modifiers per terrain:
     ///   Snow: 0.8 (reduced — at home)
-    ///   Dirt: 1.6 (debris increases drag)
+    ///   Dirt: 3.0 (debris and scraping increases drag heavily)
     ///   Ice:  0.7 (very clean surface)
     /// </summary>
     public override float GetTerrainDragModifier(TerrainType terrain) => terrain switch
     {
         TerrainType.Snow => 0.8f,
-        TerrainType.Dirt => 1.6f,
+        TerrainType.Dirt => 3.0f,
         TerrainType.Ice => 0.7f,
         _ => 1.0f
     };

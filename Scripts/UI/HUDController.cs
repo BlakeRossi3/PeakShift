@@ -10,6 +10,7 @@ public partial class HUDController : CanvasLayer
     private Label _distanceLabel;
     private Label _scoreLabel;
     private Label _multiplierLabel;
+    private Label _speedLabel;
     private TextureRect _vehicleIcon;
     private BaseButton _swapButton;
     private ColorRect[] _terrainPreview = new ColorRect[5];
@@ -44,6 +45,7 @@ public partial class HUDController : CanvasLayer
         _scoreLabel = GetNodeOrNull<Label>("%ScoreLabel");
         _multiplierLabel = GetNodeOrNull<Label>("%MultiplierLabel");
         _vehicleIcon = GetNodeOrNull<TextureRect>("%VehicleIcon");
+        _speedLabel = GetNodeOrNull<Label>("%SpeedLabel");
         _swapButton = GetNodeOrNull<BaseButton>("%SwapButton");
 
         for (int i = 0; i < 5; i++)
@@ -119,6 +121,13 @@ public partial class HUDController : CanvasLayer
             {
                 _flipPointsLabel.Visible = false;
             }
+        }
+
+        // Update speedometer
+        if (_speedLabel != null && PlayerRef != null)
+        {
+            int kmh = (int)(Mathf.Abs(PlayerRef.MomentumSpeed) / 10f);
+            _speedLabel.Text = $"{kmh} km/h";
         }
 
         // Update debug overlay

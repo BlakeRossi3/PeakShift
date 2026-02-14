@@ -14,7 +14,7 @@ namespace PeakShift;
 /// Core loop each frame:
 ///   1. Update state machine transitions
 ///   2. Compute physics (slope accel, drag, gravity, air physics)
-///   3. Apply velocity via MoveAndSlide
+///   3. Grounded: path-follow (position from terrain math). Airborne: Euler integration.
 ///   4. Check failure conditions
 ///
 /// All physics math is delegated to MomentumPhysics (pure, stateless, deterministic).
@@ -88,10 +88,6 @@ public partial class PlayerController : CharacterBody2D
 	private float _swapTimer;
 	private bool _canSwap = true;
 
-	// Coyote time (brief window after leaving ground where we don't immediately transition)
-	private float _coyoteTimer;
-	private bool _wasOnFloor;
-
 	// Airborne state
 	private Vector2 _airVelocity;
 	private Vector2 _launchNormal;
@@ -106,6 +102,9 @@ public partial class PlayerController : CharacterBody2D
 	// Post-flip bonus window
 	private float _flipBonusTimer;
 
+	// Flip cooldown (delay between successive flips)
+	private float _flipCooldownTimer;
+
 	// Tuck state
 	private bool _tuckInputHeld;
 
@@ -114,10 +113,6 @@ public partial class PlayerController : CharacterBody2D
 
 	// Slope-following visual rotation
 	private float _visualRotation;
-
-	// Smoothed floor normal to prevent jitter at chunk boundaries
-	private Vector2 _smoothedFloorNormal = Vector2.Up;
-
 
 	// ── Debug state (exposed for HUD overlay) ──────────────────────
 	public float DebugSlopeAngleDeg { get; private set; }
@@ -148,11 +143,7 @@ public partial class PlayerController : CharacterBody2D
 		_bikerTexture = GD.Load<Texture2D>("res://Assets/Art/Characters/Biker.png");
 		_skierTexture = GD.Load<Texture2D>("res://Assets/Art/Characters/Skier.png");
 
-		// Configure CharacterBody2D for terrain hugging
-		FloorSnapLength = 48f;
-		FloorMaxAngle = Mathf.DegToRad(70f);
-
-		// Detect collision shape half-height for snap offset
+		// Detect collision shape half-height for terrain Y offset
 		var collisionShape = GetNodeOrNull<CollisionShape2D>("CollisionShape2D");
 		if (collisionShape?.Shape is RectangleShape2D rect)
 			_collisionHalfHeight = rect.Size.Y / 2f;
@@ -180,7 +171,7 @@ public partial class PlayerController : CharacterBody2D
 			return;
 
 		// ── Flip input (ground or airborne) ────────────────────────
-		if (@event.IsActionPressed("jump"))
+		if (@event.IsActionPressed("jump") && _flipCooldownTimer <= 0f)
 		{
 			// Allow flipping from ground or air
 			if (CurrentMoveState is MoveState.Grounded or MoveState.Tucking)
@@ -199,11 +190,13 @@ public partial class PlayerController : CharacterBody2D
 				}
 				EnterFlipping();
 			}
-			// If already flipping, queue another flip
+			// If already flipping, queue another flip (double-jump style)
 			else if (CurrentMoveState == MoveState.Flipping)
 			{
 				_targetFlipCount++;
-				GD.Print($"[PlayerController] Queued flip #{_targetFlipCount}");
+				_airVelocity.Y = Mathf.Min(_airVelocity.Y, PhysicsConstants.FlipLaunchImpulse);
+				_flipCooldownTimer = PhysicsConstants.FlipCooldown;
+				GD.Print($"[PlayerController] Queued flip #{_targetFlipCount} — air boost applied");
 			}
 		}
 
@@ -238,6 +231,7 @@ public partial class PlayerController : CharacterBody2D
 
 		UpdateSwapCooldown(dt);
 		UpdateFlipBonusTimer(dt);
+		UpdateFlipCooldown(dt);
 		UpdateTuckState();
 
 		// ── State machine dispatch ──────────────────────────────────
@@ -271,18 +265,6 @@ public partial class PlayerController : CharacterBody2D
 			}
 		}
 
-		// Hazard collision
-		for (int i = 0; i < GetSlideCollisionCount(); i++)
-		{
-			var collision = GetSlideCollision(i);
-			if (collision.GetCollider() is Node2D collider && collider.IsInGroup("hazard"))
-			{
-				OnCrash("Hazard collision");
-				return;
-			}
-		}
-
-		_wasOnFloor = IsOnFloor();
 		UpdateDebugState();
 	}
 
@@ -291,31 +273,35 @@ public partial class PlayerController : CharacterBody2D
 	private void ProcessGrounded(float dt)
 	{
 		bool isTucking = CurrentMoveState == MoveState.Tucking;
+		bool isBraking = isTucking && CurrentVehicleType == VehicleType.Bike;
+		bool isActuallyTucking = isTucking && !isBraking;
+		float playerX = GlobalPosition.X;
 
-		// ── Compute slope from floor normal or terrain query ────────
-		// Smooth the floor normal to eliminate jitter at chunk boundaries
-		Vector2 rawNormal;
-
-		if (IsOnFloor())
-		{
-			rawNormal = GetFloorNormal();
-			_coyoteTimer = PhysicsConstants.CoyoteTime;
-		}
-		else if (_terrainManager != null)
-		{
-			rawNormal = _terrainManager.GetTerrainNormalAt(GlobalPosition.X);
-		}
-		else
-		{
-			rawNormal = Vector2.Up;
-		}
-
-		// Exponential smoothing — converges fast (20/s) but prevents single-frame spikes
-		_smoothedFloorNormal = _smoothedFloorNormal.Lerp(rawNormal, 1f - Mathf.Exp(-20f * dt)).Normalized();
-		Vector2 floorNormal = _smoothedFloorNormal;
-		float slopeAngleRad = MomentumPhysics.ComputeSignedSlopeAngle(floorNormal);
-
+		// ── Query terrain math directly ─────────────────────────────
+		Vector2 terrainNormal = _terrainManager != null
+			? _terrainManager.GetTerrainNormalAt(playerX)
+			: Vector2.Up;
+		float slopeAngleRad = MomentumPhysics.ComputeSignedSlopeAngle(terrainNormal);
 		DebugSlopeAngleDeg = Mathf.RadToDeg(slopeAngleRad);
+
+		// ── Update terrain type at current position ─────────────────
+		if (_terrainManager != null)
+			CurrentTerrain = _terrainManager.GetTerrainType(playerX);
+
+		// ── Centripetal launch check ────────────────────────────────
+		// Tucking/braking suppresses launch — player sticks to the ground.
+		// Don't launch when going backwards or near-stopped
+		if (!isTucking && MomentumSpeed > 0f && _terrainManager != null)
+		{
+			float curvature = ComputeCurvatureAtPlayer();
+			float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
+
+			if (MomentumPhysics.ShouldLaunchFromSurface(MomentumSpeed, curvature, gravMult, isActuallyTucking))
+			{
+				TransitionToAirborne();
+				return;
+			}
+		}
 
 		// ── Gather modifiers ────────────────────────────────────────
 		float terrainFriction = MomentumPhysics.GetTerrainFriction(CurrentTerrain);
@@ -326,21 +312,31 @@ public partial class PlayerController : CharacterBody2D
 		float vehicleDragTerrainMod = CurrentVehicle.GetTerrainDragModifier(CurrentTerrain);
 		float vehicleTerrainBonus = CurrentVehicle.GetTerrainBonus(CurrentTerrain);
 
+		// When going backwards, terrain bonus always pushes toward forward (opposes backward motion)
+		if (MomentumSpeed < 0f)
+			vehicleTerrainBonus = Mathf.Abs(vehicleTerrainBonus);
+
 		// ── Compute effective coefficients ──────────────────────────
 		float effectiveDrag = MomentumPhysics.GetEffectiveDragCoefficient(
-			isTucking, terrainDragMod * vehicleDragTerrainMod, vehicleDragMod);
+			isActuallyTucking, terrainDragMod * vehicleDragTerrainMod, vehicleDragMod);
 
 		float effectiveRollingResistance = MomentumPhysics.GetEffectiveRollingResistance(
-			isTucking, terrainFriction, vehicleFrictionMod)
+			isActuallyTucking, terrainFriction, vehicleFrictionMod)
 			* CurrentVehicle.RollingResistanceModifier;
+
+		// ── Brake: bike uses tuck input as powerful brake ────────────
+		if (isBraking)
+		{
+			effectiveDrag *= PhysicsConstants.BrakeDragMultiplier;
+		}
 
 		// Apply post-flip bonus drag reduction
 		if (_flipBonusTimer > 0f)
 			effectiveDrag *= PhysicsConstants.FlipSuccessDragMultiplier;
 
-		// ── Tuck downhill acceleration bonus ────────────────────────
+		// ── Tuck downhill acceleration bonus (ski only) ─────────────
 		float tuckAccelBonus = 1.0f;
-		if (isTucking && slopeAngleRad > 0f)
+		if (isActuallyTucking && slopeAngleRad > 0f)
 			tuckAccelBonus = PhysicsConstants.TuckDownhillAccelBonus;
 
 		// ── Compute total ground acceleration ───────────────────────
@@ -349,98 +345,56 @@ public partial class PlayerController : CharacterBody2D
 			slopeAngleRad * tuckAccelBonus,
 			effectiveDrag,
 			effectiveRollingResistance,
-			1.0f, // friction already baked into effectiveRollingResistance
+			1.0f,
 			vehicleTerrainBonus);
+
+		// Extra constant brake deceleration force
+		if (isBraking && MomentumSpeed > 0f)
+			acceleration -= PhysicsConstants.BrakeDeceleration;
 
 		// ── Terminal velocity ───────────────────────────────────────
 		float maxSpeed = CurrentVehicle?.MaxSpeed ?? PhysicsConstants.TerminalVelocity;
-		float terminalVel = MomentumPhysics.GetEffectiveTerminalVelocity(isTucking, maxSpeed);
+		float terminalVel = MomentumPhysics.GetEffectiveTerminalVelocity(isActuallyTucking, maxSpeed);
+
+		// ── Determine min speed based on vehicle ────────────────────
+		float minSpeed;
+		if (CurrentVehicle.CanMoveBackwards)
+			minSpeed = -PhysicsConstants.MaxBackwardSpeed;
+		else if (isBraking)
+			minSpeed = PhysicsConstants.BrakeMinSpeed;
+		else
+			minSpeed = PhysicsConstants.MinimumSpeed;
 
 		// ── Integrate speed ─────────────────────────────────────────
-		MomentumSpeed = MomentumPhysics.IntegrateSpeed(MomentumSpeed, acceleration, dt, terminalVel);
+		MomentumSpeed = MomentumPhysics.IntegrateSpeed(MomentumSpeed, acceleration, dt, terminalVel, minSpeed);
 
-		// ── Build velocity vector along surface ─────────────────────
-		// MomentumSpeed is treated as horizontal speed. Vertical component
-		// is derived from the slope ratio so forward progress stays consistent
-		// regardless of slope steepness (no "lagging" on steep downhills).
-		Vector2 tangent = new Vector2(floorNormal.Y, -floorNormal.X);
-		if (tangent.X < 0f) tangent = -tangent;
+		// ── PATH-FOLLOWING: Position from math, not collision ───────
+		float newX = playerX + MomentumSpeed * dt;
 
-		if (tangent.X > 0.1f)
+		// Check if we've reached a gap — transition to airborne at the lip
+		if (_terrainManager != null && _terrainManager.IsOverGap(newX))
 		{
-			float slopeRatio = tangent.Y / tangent.X;
-			Velocity = new Vector2(MomentumSpeed, MomentumSpeed * slopeRatio);
-		}
-		else
-		{
-			// Near-vertical slope fallback — use tangent direction directly
-			Velocity = tangent * MomentumSpeed;
+			// If going backwards into a gap, just fall straight down
+			if (MomentumSpeed < 0f)
+				_airVelocity = new Vector2(0f, 0f);
+			TransitionToAirborne();
+			return;
 		}
 
-		// ── Tuck downforce (grounded) ──────────────────────────────
-		// When tucking on ground, apply downward velocity component to
-		// counteract small upward bounces from terrain undulations.
-		if (isTucking)
-		{
-			Velocity = new Vector2(Velocity.X,
-				Mathf.Max(Velocity.Y, PhysicsConstants.TuckGroundedDownforce * dt));
-		}
+		// Snap Y to terrain curve minus half-height offset
+		float terrainY = _terrainManager?.GetTerrainHeight(newX) ?? GlobalPosition.Y;
+		float newY = terrainY - _collisionHalfHeight;
+		GlobalPosition = new Vector2(newX, newY);
 
-		// ── Centripetal launch check ────────────────────────────────
-		// Before MoveAndSlide, check if the player should detach from the
-		// terrain at a convex crest (like Tiny Wings / Sonic).
-		// Tuck raises the launch threshold — prevents premature lift.
-		if (_terrainManager != null)
-		{
-			float curvature = ComputeCurvatureAtPlayer();
-			float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
-
-			if (MomentumPhysics.ShouldLaunchFromSurface(MomentumSpeed, curvature, gravMult, isTucking))
-			{
-				// TransitionToAirborne handles disabling floor snap
-				TransitionToAirborne();
-				MoveAndSlide();
-				return;
-			}
-		}
+		// Set Velocity for debug tools and Godot's internal state
+		Vector2 tangent = _terrainManager?.GetTerrainTangentAt(newX) ?? Vector2.Right;
+		Velocity = tangent * MomentumSpeed;
 
 		// ── Slope-following visual rotation ─────────────────────────
-		float targetAngle = Mathf.Atan2(tangent.Y, tangent.X); // angle of surface tangent
+		float targetAngle = Mathf.Atan2(tangent.Y, tangent.X);
 		_visualRotation = Mathf.Lerp(_visualRotation, targetAngle, 1f - Mathf.Exp(-12f * dt));
 		if (_playerSprite != null)
 			_playerSprite.Rotation = _visualRotation;
-
-		MoveAndSlide();
-
-		// ── Post-move terrain hugging ───────────────────────────────
-		// If MoveAndSlide lost floor contact (small bump, polygon edge),
-		// snap the player back to the terrain surface if they're close.
-		// Tuck increases snap distance for better path adherence.
-		if (!IsOnFloor() && _terrainManager != null)
-		{
-			float terrainY = _terrainManager.GetTerrainHeight(GlobalPosition.X);
-			float targetY = terrainY - _collisionHalfHeight;
-			float distToSurface = Mathf.Abs(Position.Y - targetY);
-			float snapDist = MomentumPhysics.GetEffectiveSnapDistance(isTucking);
-
-			if (distToSurface < snapDist)
-			{
-				// Snap to surface — player flows over the bump
-				Position = new Vector2(Position.X, targetY);
-				_coyoteTimer = PhysicsConstants.CoyoteTime;
-			}
-			else
-			{
-				// Too far from surface — over a gap or genuine air
-				_coyoteTimer -= dt;
-				if (_coyoteTimer <= 0f)
-				{
-					TransitionToAirborne();
-					ProcessAirborne(dt);
-					return;
-				}
-			}
-		}
 	}
 
 	// ── Airborne Physics ────────────────────────────────────────────
@@ -452,16 +406,12 @@ public partial class PlayerController : CharacterBody2D
 
 		// ── Integrate airborne trajectory ───────────────────────────
 		if (isAerialTuck)
-		{
-			// Aerial tuck: boosted gravity + dive acceleration + upward velocity clamp
 			_airVelocity = MomentumPhysics.IntegrateAirborneTucking(_airVelocity, dt, gravMult);
-		}
 		else
-		{
-			// Normal airborne: standard gravity + light air drag
 			_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, gravMult);
-		}
 
+		// ── Move by direct position update ──────────────────────────
+		GlobalPosition += _airVelocity * dt;
 		Velocity = _airVelocity;
 
 		// ── Velocity-direction visual rotation ──────────────────────
@@ -470,12 +420,18 @@ public partial class PlayerController : CharacterBody2D
 		if (_playerSprite != null)
 			_playerSprite.Rotation = _visualRotation;
 
-		MoveAndSlide();
-
-		// ── Landing detection ───────────────────────────────────────
-		if (IsOnFloor())
+		// ── Math-based landing detection ────────────────────────────
+		if (_terrainManager != null)
 		{
-			OnLanding();
+			float terrainY = _terrainManager.GetTerrainHeight(GlobalPosition.X);
+			float playerBottomY = GlobalPosition.Y + _collisionHalfHeight;
+			bool overGap = _terrainManager.IsOverGap(GlobalPosition.X);
+
+			if (!overGap && playerBottomY >= terrainY && _airVelocity.Y > 0f)
+			{
+				GlobalPosition = new Vector2(GlobalPosition.X, terrainY - _collisionHalfHeight);
+				OnLanding();
+			}
 		}
 	}
 
@@ -486,9 +442,11 @@ public partial class PlayerController : CharacterBody2D
 		float gravMult = CurrentVehicle?.GravityMultiplier ?? 1.0f;
 
 		// ── Airborne trajectory with reduced gravity during flip ────
-		// Apply flip gravity multiplier for floatier, more controllable flips
 		float flipGravMult = gravMult * PhysicsConstants.FlipGravityMultiplier;
 		_airVelocity = MomentumPhysics.IntegrateAirborne(_airVelocity, dt, flipGravMult);
+
+		// ── Move by direct position update ──────────────────────────
+		GlobalPosition += _airVelocity * dt;
 		Velocity = _airVelocity;
 
 		// ── Integrate rotation toward target flip count ─────────────
@@ -497,12 +455,10 @@ public partial class PlayerController : CharacterBody2D
 		if (_flipRotation < maxRotation)
 		{
 			_flipRotation = MomentumPhysics.IntegrateFlipRotation(_flipRotation, _flipAngularVelocity, dt);
-			// Clamp to target to prevent overshoot
 			if (_flipRotation >= maxRotation)
 				_flipRotation = maxRotation;
 		}
 
-		// Apply visual rotation
 		if (_playerSprite != null)
 			_playerSprite.Rotation = _flipRotation;
 
@@ -510,19 +466,24 @@ public partial class PlayerController : CharacterBody2D
 		int previousFlipCount = _flipCount;
 		_flipCount = (int)(Mathf.Abs(_flipRotation) / Mathf.Tau);
 
-		// Check if we just completed a new flip
 		if (_flipCount > previousFlipCount)
 		{
 			_flipCompleted = true;
 			GD.Print($"[PlayerController] Flip #{_flipCount} completed!");
 		}
 
-		MoveAndSlide();
-
-		// ── Landing detection ───────────────────────────────────────
-		if (IsOnFloor())
+		// ── Math-based landing detection ────────────────────────────
+		if (_terrainManager != null)
 		{
-			OnFlipLanding();
+			float terrainY = _terrainManager.GetTerrainHeight(GlobalPosition.X);
+			float playerBottomY = GlobalPosition.Y + _collisionHalfHeight;
+			bool overGap = _terrainManager.IsOverGap(GlobalPosition.X);
+
+			if (!overGap && playerBottomY >= terrainY && _airVelocity.Y > 0f)
+			{
+				GlobalPosition = new Vector2(GlobalPosition.X, terrainY - _collisionHalfHeight);
+				OnFlipLanding();
+			}
 		}
 	}
 
@@ -530,30 +491,27 @@ public partial class PlayerController : CharacterBody2D
 
 	private void TransitionToAirborne()
 	{
-		// If tuck is held, transition to aerial tuck (dive) instead of normal airborne
 		bool wasTucking = _tuckInputHeld;
 		CurrentMoveState = wasTucking ? MoveState.AirborneTucking : MoveState.Airborne;
 
-		// Disable floor snap while airborne to prevent premature re-attachment to terrain
-		FloorSnapLength = 0f;
-
-		// Use current velocity as air velocity
-		_airVelocity = Velocity;
-
-		// If velocity is mostly horizontal (launched from ramp), use terrain normal
-		// to compute proper launch arc
-		if (_airVelocity.Y >= -10f && _terrainManager != null)
+		// If going backwards (ski sliding), just fall — don't compute a backwards launch
+		if (MomentumSpeed < 0f)
 		{
-			Vector2 terrainNormal = _terrainManager.GetTerrainNormalAt(GlobalPosition.X);
-			_airVelocity = MomentumPhysics.ComputeLaunchVelocity(MomentumSpeed, terrainNormal);
-			_launchNormal = terrainNormal;
+			_airVelocity = new Vector2(0f, 0f);
+			_launchNormal = Vector2.Up;
+			MomentumSpeed = 0f;
+			SetSkiTucking(wasTucking);
+			return;
 		}
 
-		// Update visual tuck state
-		SetSkiTucking(wasTucking);
+		// Compute launch velocity from current speed and terrain normal
+		Vector2 terrainNormal = _terrainManager != null
+			? _terrainManager.GetTerrainNormalAt(GlobalPosition.X)
+			: Vector2.Up;
+		_airVelocity = MomentumPhysics.ComputeLaunchVelocity(MomentumSpeed, terrainNormal);
+		_launchNormal = terrainNormal;
 
-		// Gap clearance is no longer predicted — player flies the trajectory
-		// and dies naturally from FallDeathBelowTerrain if they miss.
+		SetSkiTucking(wasTucking);
 	}
 
 	private void EnterFlipping()
@@ -572,70 +530,62 @@ public partial class PlayerController : CharacterBody2D
 
 		// Air-jump: boost upward when initiating flip
 		_airVelocity.Y = Mathf.Min(_airVelocity.Y, PhysicsConstants.FlipLaunchImpulse);
+		_flipCooldownTimer = PhysicsConstants.FlipCooldown;
 
 		GD.Print($"[PlayerController] Flip initiated — angular vel: {_flipAngularVelocity:F1} rad/s, air impulse: {_airVelocity.Y:F0}");
 	}
 
 	private void OnLanding()
 	{
-		// Re-enable floor snap now that we're grounded
-		FloorSnapLength = 48f;
-
-		// If landing while aerial-tucking and tuck is still held, go straight to grounded tuck
 		bool landIntoTuck = _tuckInputHeld;
 		CurrentMoveState = landIntoTuck ? MoveState.Tucking : MoveState.Grounded;
 
 		// Project full air velocity onto slope tangent to preserve energy from steep dives
-		Vector2 landNormal = IsOnFloor() ? GetFloorNormal() : Vector2.Up;
+		Vector2 landNormal = _terrainManager != null
+			? _terrainManager.GetTerrainNormalAt(GlobalPosition.X)
+			: Vector2.Up;
 		MomentumSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal);
 		_airVelocity = Vector2.Zero;
 
-		// Update visual tuck state
 		SetSkiTucking(landIntoTuck);
-
-		// _visualRotation will be smoothly updated by ProcessGrounded next frame
 	}
 
 	private void OnFlipLanding()
 	{
-		// Check landing angle - made more forgiving (90 degrees instead of 35)
 		float normalized = _flipRotation % Mathf.Tau;
 		if (normalized < 0f) normalized += Mathf.Tau;
-		float toleranceRad = Mathf.DegToRad(90f); // Much more forgiving!
+		float toleranceRad = Mathf.DegToRad(90f);
 		bool landingSafe = normalized <= toleranceRad || normalized >= (Mathf.Tau - toleranceRad);
 
 		if (_flipCount > 0 && landingSafe)
 		{
-			// Successful flip — project speed onto slope, apply boost, then bounce
-			Vector2 landNormal = IsOnFloor() ? GetFloorNormal() : Vector2.Up;
+			Vector2 landNormal = _terrainManager != null
+				? _terrainManager.GetTerrainNormalAt(GlobalPosition.X)
+				: Vector2.Up;
 			float projectedSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal);
 			float boostedSpeed = projectedSpeed * PhysicsConstants.FlipSuccessSpeedBoost;
 			MomentumSpeed = boostedSpeed;
 			_flipBonusTimer = PhysicsConstants.FlipSuccessDragWindowDuration;
 
-			// Award points: 100 per flip
 			int points = _flipCount * 100;
 			EmitSignal(SignalName.FlipCompleted);
 			EmitSignal(SignalName.FlipPointsScored, points, _flipCount);
-			GD.Print($"[PlayerController] Flip bounce! {_flipCount} flip(s), {points} points! Speed: {boostedSpeed:F0}");
+			GD.Print($"[PlayerController] Flip landed! {_flipCount} flip(s), {points} points! Speed: {boostedSpeed:F0}");
 
-			// Reset flip state
 			_flipRotation = 0f;
 			_flipAngularVelocity = 0f;
 			_flipCompleted = false;
 			_targetFlipCount = 0;
 			_flipCount = 0;
+			_airVelocity = Vector2.Zero;
 
-			// Bounce: stay airborne with an upward impulse instead of snapping to ground
-			_airVelocity = new Vector2(boostedSpeed, -PhysicsConstants.FlipBounceImpulse);
-			CurrentMoveState = MoveState.Airborne;
-			FloorSnapLength = 0f;
-
-			// Don't snap visual rotation — ProcessGrounded will lerp it on the bounce landing
+			// Land on the ground — no bounce
+			bool landIntoTuck = _tuckInputHeld;
+			CurrentMoveState = landIntoTuck ? MoveState.Tucking : MoveState.Grounded;
+			SetSkiTucking(landIntoTuck);
 		}
 		else
 		{
-			// Failed flip — crash
 			EmitSignal(SignalName.FlipFailed);
 			OnCrash(landingSafe ? "No flips completed" : "Bad landing angle");
 		}
@@ -731,8 +681,6 @@ public partial class PlayerController : CharacterBody2D
 
 		_canSwap = true;
 		_swapTimer = 0f;
-		_coyoteTimer = 0f;
-		_wasOnFloor = false;
 
 		_airVelocity = Vector2.Zero;
 		_launchNormal = Vector2.Up;
@@ -743,6 +691,7 @@ public partial class PlayerController : CharacterBody2D
 		_targetFlipCount = 0;
 		_flipCount = 0;
 		_flipBonusTimer = 0f;
+		_flipCooldownTimer = 0f;
 
 		_tuckInputHeld = false;
 		SetSkiTucking(false);
@@ -786,6 +735,12 @@ public partial class PlayerController : CharacterBody2D
 	{
 		if (_flipBonusTimer > 0f)
 			_flipBonusTimer -= dt;
+	}
+
+	private void UpdateFlipCooldown(float dt)
+	{
+		if (_flipCooldownTimer > 0f)
+			_flipCooldownTimer -= dt;
 	}
 
 	/// <summary>

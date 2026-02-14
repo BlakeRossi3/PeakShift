@@ -12,44 +12,70 @@ public static class MomentumPhysics
     // ── Core Downhill/Uphill Acceleration ────────────────────────────
 
     /// <summary>
-    /// Computes gravitational acceleration along the slope.
-    /// Positive slopeAngle = downhill (player accelerates with full gravity).
-    /// Negative slopeAngle = uphill (player decelerates with reduced gravity).
+    /// Computes gravitational acceleration along the slope, accounting for travel direction.
     ///
-    /// Uphill gravity is scaled by UphillGravityScale so the player carries
-    /// momentum over small hills instead of rapidly decelerating.
+    /// "Fighting gravity" = speed opposes the slope's gravity direction.
+    /// When fighting gravity (e.g. going forward uphill, or backwards on a downhill),
+    /// UphillGravityScale reduces deceleration so momentum carries over ramps.
+    ///
+    /// "Going with gravity" = speed matches the slope's gravity direction (or speed is ~0).
+    /// Full gravity with slope attraction applies, enabling natural acceleration
+    /// and backwards sliding on skis.
     /// </summary>
-    /// <param name="slopeAngleRad">Signed slope angle in radians. Positive = downhill.</param>
+    /// <param name="slopeAngleRad">Signed slope angle in radians. Positive = downhill-right.</param>
+    /// <param name="currentSpeed">Current signed speed. Positive = right, negative = left.</param>
     /// <returns>Acceleration component from gravity along slope (px/s^2).</returns>
-    public static float GravitySlopeAcceleration(float slopeAngleRad)
+    public static float GravitySlopeAcceleration(float slopeAngleRad, float currentSpeed = float.MaxValue)
     {
-        float gravityScale = slopeAngleRad < 0f ? PhysicsConstants.UphillGravityScale : 1.0f;
-        return PhysicsConstants.Gravity * Mathf.Sin(slopeAngleRad) * gravityScale;
+        float sinTheta = Mathf.Sin(slopeAngleRad);
+
+        // Determine if player is fighting gravity or going with it.
+        // Gravity pulls in the direction of sin(slope): positive = right, negative = left.
+        // "Fighting" means speed direction opposes gravity direction.
+        bool fightingGravity = (currentSpeed > 0f && sinTheta < 0f)
+                            || (currentSpeed < 0f && sinTheta > 0f);
+
+        if (fightingGravity)
+        {
+            // Fighting gravity: reduced deceleration to carry momentum over ramps
+            return PhysicsConstants.Gravity * sinTheta * PhysicsConstants.UphillGravityScale;
+        }
+        else
+        {
+            // Going with gravity (or stationary): full gravity + slope attraction
+            float absSin = Mathf.Abs(sinTheta);
+            float attractionBoost = 1.0f + PhysicsConstants.SlopeAttractionStrength * absSin;
+            return PhysicsConstants.Gravity * sinTheta * attractionBoost;
+        }
     }
 
     /// <summary>
     /// Computes velocity-dependent aerodynamic drag deceleration.
-    /// Formula: a_drag = -sign(v) * dragCoeff * v^2
-    /// Always opposes motion direction.
+    /// Formula: a_drag = -dragCoeff * speed * |speed|
+    /// Always opposes motion direction (works for both positive and negative speed).
     /// </summary>
-    /// <param name="speed">Current scalar speed (px/s). Always positive.</param>
+    /// <param name="speed">Current signed speed (px/s). Positive = forward, negative = backward.</param>
     /// <param name="dragCoefficient">Effective drag coefficient (after terrain/tuck modifiers).</param>
-    /// <returns>Deceleration from drag (px/s^2, always negative or zero).</returns>
+    /// <returns>Deceleration from drag (px/s^2, always opposes motion).</returns>
     public static float DragDeceleration(float speed, float dragCoefficient)
     {
-        return -dragCoefficient * speed * speed;
+        return -dragCoefficient * speed * Mathf.Abs(speed);
     }
 
     /// <summary>
     /// Computes constant rolling resistance deceleration.
-    /// Formula: a_roll = -rollingResistance * frictionCoeff
+    /// Formula: a_roll = -sign(speed) * rollingResistance * frictionCoeff
+    /// Always opposes motion direction (works for both positive and negative speed).
+    /// Returns 0 when speed is 0 (no motion to oppose).
     /// </summary>
+    /// <param name="speed">Current signed speed for direction (px/s).</param>
     /// <param name="rollingResistance">Base rolling resistance (px/s^2).</param>
     /// <param name="frictionCoefficient">Terrain friction multiplier.</param>
-    /// <returns>Deceleration from rolling resistance (px/s^2, always negative).</returns>
-    public static float RollingResistanceDeceleration(float rollingResistance, float frictionCoefficient)
+    /// <returns>Deceleration from rolling resistance (px/s^2, opposes motion).</returns>
+    public static float RollingResistanceDeceleration(float speed, float rollingResistance, float frictionCoefficient)
     {
-        return -rollingResistance * frictionCoefficient;
+        if (speed == 0f) return 0f;
+        return -Mathf.Sign(speed) * rollingResistance * frictionCoefficient;
     }
 
     /// <summary>
@@ -69,21 +95,31 @@ public static class MomentumPhysics
         float frictionCoefficient,
         float vehicleTerrainBonus)
     {
-        float gravityComponent = GravitySlopeAcceleration(slopeAngleRad);
+        float gravityComponent = GravitySlopeAcceleration(slopeAngleRad, speed);
         float dragComponent = DragDeceleration(speed, dragCoefficient);
-        float rollComponent = RollingResistanceDeceleration(rollingResistance, frictionCoefficient);
+        float rollComponent = RollingResistanceDeceleration(speed, rollingResistance, frictionCoefficient);
 
         return gravityComponent + dragComponent + rollComponent + vehicleTerrainBonus;
     }
 
     /// <summary>
-    /// Applies acceleration to speed and clamps to terminal velocity.
-    /// Returns the new speed (always >= 0).
+    /// Applies acceleration to speed and clamps to [MinimumSpeed, terminalVelocity].
+    /// Default version — always enforces MinimumSpeed floor (forward motion).
     /// </summary>
     public static float IntegrateSpeed(float currentSpeed, float acceleration, float dt, float terminalVelocity)
     {
         float newSpeed = currentSpeed + acceleration * dt;
         return Mathf.Clamp(newSpeed, PhysicsConstants.MinimumSpeed, terminalVelocity);
+    }
+
+    /// <summary>
+    /// Applies acceleration to speed with a custom minimum speed.
+    /// Use minSpeed=0 for braking to a stop, or negative for backwards sliding.
+    /// </summary>
+    public static float IntegrateSpeed(float currentSpeed, float acceleration, float dt, float terminalVelocity, float minSpeed)
+    {
+        float newSpeed = currentSpeed + acceleration * dt;
+        return Mathf.Clamp(newSpeed, minSpeed, terminalVelocity);
     }
 
     // ── Jump / Airborne Physics ─────────────────────────────────────

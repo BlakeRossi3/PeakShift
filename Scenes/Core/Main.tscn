@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://bc2x4s6dpqynm"]
+[gd_scene load_steps=13 format=3 uid="uid://bc2x4s6dpqynm"]
 
 [ext_resource type="Script" uid="uid://cvl4teyb2n2tt" path="res://Scripts/Core/GameManager.cs" id="1"]
 [ext_resource type="Script" uid="uid://csfwwxx7mtaec" path="res://Scripts/Core/RunManager.cs" id="2"]
@@ -13,21 +13,21 @@
 [ext_resource type="Script" uid="uid://no2nntlijja0" path="res://Scripts/Player/PlayerCamera.cs" id="12"]
 [ext_resource type="Script" uid="uid://dfpgfd765ab3t" path="res://Scripts/Hazards/AvalancheWall.cs" id="13"]
 
-[node name="Main" type="Node2D" unique_id=398987662]
+[node name="Main" type="Node2D"]
 
-[node name="GameManager" type="Node" parent="." unique_id=1626005366]
+[node name="GameManager" type="Node" parent="."]
 script = ExtResource("1")
 
-[node name="RunManager" type="Node" parent="." unique_id=1350709111]
+[node name="RunManager" type="Node" parent="."]
 script = ExtResource("2")
 
-[node name="AudioManager" type="Node" parent="." unique_id=1699885609]
+[node name="AudioManager" type="Node" parent="."]
 script = ExtResource("5")
 
-[node name="BiomeManager" type="Node" parent="." unique_id=2138705717]
+[node name="BiomeManager" type="Node" parent="."]
 script = ExtResource("7")
 
-[node name="Background" type="ColorRect" parent="." unique_id=2019042744]
+[node name="Background" type="ColorRect" parent="."]
 z_index = -10
 offset_left = -10000.0
 offset_top = -10000.0
@@ -36,36 +36,36 @@ offset_bottom = 10000.0
 mouse_filter = 2
 color = Color(0.53, 0.72, 0.88, 1)
 
-[node name="Player" parent="." unique_id=185597562 instance=ExtResource("6")]
+[node name="Player" parent="." instance=ExtResource("6")]
 position = Vector2(100, 260)
 
-[node name="PlayerCamera" type="Camera2D" parent="Player" unique_id=536339362]
+[node name="PlayerCamera" type="Camera2D" parent="Player"]
 zoom = Vector2(0.5, 0.5)
 position_smoothing_enabled = true
 script = ExtResource("12")
 
-[node name="TerrainManager" type="Node2D" parent="." unique_id=200169775]
+[node name="TerrainManager" type="Node2D" parent="."]
 script = ExtResource("4")
 
-[node name="AvalancheWall" type="Node2D" parent="." unique_id=1397165577]
+[node name="AvalancheWall" type="Node2D" parent="."]
 script = ExtResource("13")
 
 [node name="UILayer" type="CanvasLayer" parent="."]
 layer = 10
 
-[node name="MainMenu" parent="UILayer" unique_id=959868025 instance=ExtResource("9")]
+[node name="MainMenu" parent="UILayer" instance=ExtResource("9")]
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="HUD" parent="UILayer" unique_id=1127345628 instance=ExtResource("8")]
+[node name="HUD" parent="UILayer" instance=ExtResource("8")]
 visible = false
 
-[node name="GameOver" parent="UILayer" unique_id=784268750 instance=ExtResource("10")]
+[node name="GameOver" parent="UILayer" instance=ExtResource("10")]
 visible = false
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="PauseMenu" parent="UILayer" unique_id=518684270 instance=ExtResource("11")]
+[node name="PauseMenu" parent="UILayer" instance=ExtResource("11")]
 visible = false
 grow_horizontal = 2
 grow_vertical = 2

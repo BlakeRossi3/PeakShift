@@ -8,38 +8,47 @@ public static class PhysicsConstants
 {
     // ── Gravity ──────────────────────────────────────────────────────
     /// <summary>Gravitational acceleration (px/s^2). Tuned for 2D at ~60fps.</summary>
-    public const float Gravity = 2200f;
+    public const float Gravity = 2000f;
 
     /// <summary>
     /// Gravity multiplier when traveling uphill (slope angle negative).
     /// Reduces deceleration on inclines so player carries momentum over small hills.
     /// 0.35 = only 35% of gravity opposes the player going uphill.
     /// </summary>
-    public const float UphillGravityScale = 0.35f;
+    public const float UphillGravityScale = 0.12f;
+
+    /// <summary>
+    /// Slope attraction strength. On downhill slopes, a fraction of the
+    /// surface-perpendicular gravity is redirected into along-slope acceleration,
+    /// as if the mountain pulls the player along its surface. The boost is
+    /// superlinear with steepness: accel = g * sin(θ) * (1 + strength * sin(θ)).
+    /// At 0.6, a 35° slope gets ~34% more acceleration than standard gravity.
+    /// </summary>
+    public const float SlopeAttractionStrength = 0.6f;
 
     // ── Drag & Resistance ────────────────────────────────────────────
     /// <summary>Base aerodynamic drag coefficient. Applied as: drag = coeff * v^2.</summary>
-    public const float BaseDragCoefficient = 0.00025f;
+    public const float BaseDragCoefficient = 0.00010f;
 
     /// <summary>Rolling resistance (constant force opposing motion, px/s^2).</summary>
-    public const float BaseRollingResistance = 8f;
+    public const float BaseRollingResistance = 5f;
 
     /// <summary>Air drag while airborne (much lower than ground drag).</summary>
-    public const float AirDragCoefficient = 0.00005f;
+    public const float AirDragCoefficient = 0.00002f;
 
     // ── Speed Limits ─────────────────────────────────────────────────
     /// <summary>Absolute minimum speed — player always moves forward at least this fast (px/s).</summary>
     public const float MinimumSpeed = 100f;
 
     /// <summary>Global terminal velocity cap (px/s).</summary>
-    public const float TerminalVelocity = 1800f;
+    public const float TerminalVelocity = 3000f;
 
     /// <summary>Starting speed for new runs (px/s).</summary>
-    public const float StartingSpeed = 350f;
+    public const float StartingSpeed = 450f;
 
     // ── Tuck Modifiers (Grounded) ─────────────────────────────────────
     /// <summary>Drag multiplier when tucking (0.0–1.0, lower = less drag).</summary>
-    public const float TuckDragMultiplier = 0.35f;
+    public const float TuckDragMultiplier = 0.30f;
 
     /// <summary>Rolling resistance multiplier when tucking.</summary>
     public const float TuckRollingResistanceMultiplier = 0.7f;
@@ -59,17 +68,8 @@ public static class PhysicsConstants
     /// </summary>
     public const float TuckLaunchThresholdMultiplier = 2.5f;
 
-    /// <summary>
-    /// Extra ground snap distance (px) when tucking. Adds to GroundSnapDistance
-    /// so the player sticks through bigger bumps while tucked.
-    /// </summary>
+    /// <summary>Legacy extra snap distance (px) when tucking — kept for MomentumPhysics compatibility.</summary>
     public const float TuckExtraSnapDistance = 50f;
-
-    /// <summary>
-    /// Downward velocity applied each frame while grounded-tucking to counteract
-    /// any upward bounce from terrain undulations (px/s).
-    /// </summary>
-    public const float TuckGroundedDownforce = 600f;
 
     // ── Tuck Aerial Dive ────────────────────────────────────────────
     /// <summary>
@@ -82,7 +82,7 @@ public static class PhysicsConstants
     /// Gravity scale multiplier while aerial-tucking. Stacks with vehicle gravity.
     /// At 1.6, effective gravity is 60% stronger than normal while diving.
     /// </summary>
-    public const float TuckAerialGravityMultiplier = 1.6f;
+    public const float TuckAerialGravityMultiplier = 3.0f;
 
     /// <summary>
     /// Maximum upward (negative Y) velocity allowed while aerial-tucking (px/s).
@@ -108,11 +108,8 @@ public static class PhysicsConstants
     /// <summary>How far below the terrain surface (px) before fall death triggers.</summary>
     public const float FallDeathBelowTerrain = 600f;
 
-    // ── Terrain Hugging & Centripetal Launch ─────────────────────────
-    /// <summary>
-    /// Max distance (px) the player can be from the terrain surface and still snap back.
-    /// Keeps the player glued over small bumps and undulations.
-    /// </summary>
+    // ── Centripetal Launch ──────────────────────────────────────────
+    /// <summary>Legacy snap distance (px) — kept for MomentumPhysics compatibility.</summary>
     public const float GroundSnapDistance = 80f;
 
     /// <summary>Sampling delta (px) for computing terrain curvature via finite differences.</summary>
@@ -153,8 +150,8 @@ public static class PhysicsConstants
     /// <summary>Gravity multiplier during flip (lower = floatier, more air time for tricks).</summary>
     public const float FlipGravityMultiplier = 0.85f;
 
-    /// <summary>Upward velocity impulse on successful flip landing — creates a bounce arc (px/s).</summary>
-    public const float FlipBounceImpulse = 250f;
+    /// <summary>Cooldown (seconds) before the player can initiate another flip.</summary>
+    public const float FlipCooldown = 0.2f;
 
     // ── Jump Clearance ─────────────────────────────────────────────
     // These parameters govern the "must-clear-the-gap" momentum rule.
@@ -203,15 +200,19 @@ public static class PhysicsConstants
     public const float DragModDirt = 1.1f;
     public const float DragModIce = 0.6f;
 
-    // ── Coyote Time & Buffers ────────────────────────────────────────
-    public const float CoyoteTime = 0.1f;
-
     // ── Brake ──────────────────────────────────────────────────────────
-    /// <summary>Drag multiplier when braking (bike only). Much higher drag to slow down.</summary>
-    public const float BrakeDragMultiplier = 6.0f;
+    /// <summary>Drag multiplier when braking (bike only). Very high to allow stopping.</summary>
+    public const float BrakeDragMultiplier = 20.0f;
 
-    /// <summary>Minimum speed while braking — can't fully stop.</summary>
-    public const float BrakeMinSpeed = 40f;
+    /// <summary>Extra constant deceleration force when braking (px/s^2).</summary>
+    public const float BrakeDeceleration = 600f;
+
+    /// <summary>Minimum speed while braking — can fully stop.</summary>
+    public const float BrakeMinSpeed = 0f;
+
+    // ── Backward Sliding (Ski) ─────────────────────────────────────────
+    /// <summary>Maximum backward speed for ski sliding (px/s, as positive magnitude).</summary>
+    public const float MaxBackwardSpeed = 800f;
 
     // ── Vehicle Swap ─────────────────────────────────────────────────
     public const float SwapCooldown = 0.8f;
