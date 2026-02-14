@@ -371,11 +371,11 @@ public partial class TerrainManager : Node2D
         int resolution = Mathf.Max(3, (int)(chunkWidth / PointSpacing) + 1);
         CreateTerrainChunk(_nextSpawnX, chunkWidth, resolution, terrainType, currentMod);
 
-        // Spawn obstacles for this chunk if the module has obstacle density
-        if (currentMod.Template.ObstacleDensity > 0f)
-        {
-            SpawnObstaclesForChunk(_nextSpawnX, chunkWidth, terrainType, currentMod);
-        }
+        // Obstacles disabled
+        // if (currentMod.Template.ObstacleDensity > 0f)
+        // {
+        //     SpawnObstaclesForChunk(_nextSpawnX, chunkWidth, terrainType, currentMod);
+        // }
 
         _nextSpawnX += chunkWidth;
     }
