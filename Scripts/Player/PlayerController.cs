@@ -130,8 +130,8 @@ public partial class PlayerController : CharacterBody2D
 		BikeNode ??= GetNodeOrNull<BikeController>("Bike");
 		SkiNode ??= GetNodeOrNull<SkiController>("Skis");
 
-		CurrentVehicleType = VehicleType.Bike;
-		CurrentVehicle = BikeNode;
+		CurrentVehicleType = VehicleType.Ski;
+		CurrentVehicle = SkiNode;
 		CurrentVehicle?.OnActivated();
 
 		_startPosition = Position;
@@ -670,12 +670,12 @@ public partial class PlayerController : CharacterBody2D
 		Position = new Vector2(_startPosition.X, startY - _collisionHalfHeight);
 		Velocity = Vector2.Zero;
 
-		CurrentVehicleType = VehicleType.Bike;
+		CurrentVehicleType = VehicleType.Ski;
 		CurrentMoveState = MoveState.Grounded;
 		MomentumSpeed = PhysicsConstants.StartingSpeed;
 
 		CurrentVehicle?.OnDeactivated();
-		CurrentVehicle = BikeNode;
+		CurrentVehicle = SkiNode;
 		CurrentVehicle?.OnActivated();
 		UpdateCharacterSprite();
 
