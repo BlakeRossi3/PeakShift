@@ -1,15 +1,18 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
 namespace PeakShift.Terrain;
 
 /// <summary>
-/// Registry of transition track modules. Provides filtered selection
-/// for terrain type changes (Snow/Dirt/Ice permutations).
+/// [Obsolete] Terrain transitions are now handled internally by CompoundModule sub-sections.
+/// This catalog is retained for reference but is no longer used at runtime.
 ///
+/// Previously: Registry of transition track modules for terrain type changes.
 /// Regular terrain (descent, ramp, flat, bump) is now generated procedurally
 /// by ProceduralModuleFactory. This catalog only holds transition modules.
 /// </summary>
+[Obsolete("Terrain transitions are now handled by CompoundModule sub-sections.")]
 public class ModuleCatalog
 {
     private readonly List<TrackModule> _modules = new();

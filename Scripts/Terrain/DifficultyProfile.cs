@@ -99,6 +99,29 @@ public class DifficultyProfile
     /// <summary>Rolling hills probability per generation cycle (placed after gaps).</summary>
     public float RollingHillsChance { get; set; } = 0.30f;
 
+    // ── Compound Module Parameters ─────────────────────────────
+
+    /// <summary>Minimum total compound module length at the start of a run.</summary>
+    public float CompoundLengthMinEarly { get; set; } = 8000f;
+
+    /// <summary>Maximum total compound module length at the start of a run.</summary>
+    public float CompoundLengthMaxEarly { get; set; } = 12000f;
+
+    /// <summary>Minimum total compound module length at high difficulty.</summary>
+    public float CompoundLengthMinLate { get; set; } = 12000f;
+
+    /// <summary>Maximum total compound module length at high difficulty.</summary>
+    public float CompoundLengthMaxLate { get; set; } = 20000f;
+
+    /// <summary>Distance at which compound module length reaches max range.</summary>
+    public float CompoundLengthRampDistance { get; set; } = 20000f;
+
+    /// <summary>Number of interior sub-sections at the start of a run.</summary>
+    public int CompoundInteriorCountEarly { get; set; } = 2;
+
+    /// <summary>Number of interior sub-sections at high difficulty.</summary>
+    public int CompoundInteriorCountLate { get; set; } = 4;
+
     // ── Query methods ────────────────────────────────────────────
 
     /// <summary>Returns the maximum difficulty tier allowed at the given distance.</summary>
@@ -153,5 +176,25 @@ public class DifficultyProfile
     {
         float angleDeg = GetGuidanceSlopeAngle(distance);
         return Mathf.Tan(Mathf.DegToRad(angleDeg));
+    }
+
+    /// <summary>
+    /// Returns the number of interior sub-sections for a compound module at the given distance.
+    /// </summary>
+    public int GetCompoundInteriorCount(float distance)
+    {
+        float t = Mathf.Clamp(distance / CompoundLengthRampDistance, 0f, 1f);
+        return (int)Mathf.Lerp(CompoundInteriorCountEarly, CompoundInteriorCountLate, t);
+    }
+
+    /// <summary>
+    /// Returns a randomized compound module total length appropriate for the given distance.
+    /// </summary>
+    public float GetCompoundModuleLength(float distance, RandomNumberGenerator rng)
+    {
+        float t = Mathf.Clamp(distance / CompoundLengthRampDistance, 0f, 1f);
+        float minLen = Mathf.Lerp(CompoundLengthMinEarly, CompoundLengthMinLate, t);
+        float maxLen = Mathf.Lerp(CompoundLengthMaxEarly, CompoundLengthMaxLate, t);
+        return rng.RandfRange(minLen, maxLen);
     }
 }

@@ -52,7 +52,6 @@ public partial class TerrainManager : Node2D
     // ── Module system ────────────────────────────────────────────
 
     private ModuleTrackGenerator _generator;
-    private ModuleCatalog _catalog;
     private DifficultyProfile _difficulty;
     private ModulePool _pool;
     private ObstaclePool _obstaclePool;
@@ -88,6 +87,18 @@ public partial class TerrainManager : Node2D
         {
             if (worldX >= mod.WorldStartX && worldX < mod.WorldEndX)
             {
+                if (mod.Compound != null)
+                {
+                    float localX = worldX - mod.WorldStartX;
+                    int secIdx = mod.Compound.FindSubSectionIndex(localX);
+                    secIdx = Mathf.Clamp(secIdx, 0, mod.Compound.Sections.Count - 1);
+                    var sec = mod.Compound.Sections[secIdx];
+                    return $"Compound:{sec.Type} D{mod.Compound.Difficulty} " +
+                           $"{mod.Compound.EntryTerrain}" +
+                           (mod.Compound.HasTerrainTransition ? $"→{mod.Compound.ExitTerrain}" : "") +
+                           $" [GAP {mod.ScaledGapWidth:F0}px]";
+                }
+
                 return $"{mod.Template.Shape} D{mod.Template.Difficulty} " +
                        $"{mod.Template.EntryTerrain}" +
                        (mod.Template.IsTransition ? $"→{mod.Template.ExitTerrain}" : "") +
@@ -123,9 +134,8 @@ public partial class TerrainManager : Node2D
     public override void _Ready()
     {
         // Build module system
-        _catalog = ModuleCatalog.BuildDefaultCatalog();
         _difficulty = new DifficultyProfile();
-        _generator = new ModuleTrackGenerator(_catalog, _difficulty)
+        _generator = new ModuleTrackGenerator(_difficulty)
         {
             LookaheadModules = 30,
             DespawnBehind = DespawnDistance
@@ -142,9 +152,9 @@ public partial class TerrainManager : Node2D
         for (int i = 0; i < ChunksAhead; i++)
             SpawnNextChunk();
 
-        GD.Print("[TerrainManager] Initialized with modular track generator");
-        GD.Print($"[TerrainManager] Catalog: {_catalog.All.Count} modules, " +
-                 $"Pool: {_pool.TotalCreated} terrain chunks, {_obstaclePool.TotalCreated} obstacles pre-warmed");
+        GD.Print("[TerrainManager] Initialized with compound module track generator");
+        GD.Print($"[TerrainManager] Pool: {_pool.TotalCreated} terrain chunks, " +
+                 $"{_obstaclePool.TotalCreated} obstacles pre-warmed");
     }
 
     public override void _PhysicsProcess(double delta)
@@ -175,13 +185,27 @@ public partial class TerrainManager : Node2D
             GD.Print($"[TerrainManager] ═══ Preview: next {preview.Count} modules ═══");
             foreach (var mod in preview)
             {
-                GD.Print($"  [{mod.SequenceIndex}] {mod.Template.Shape} " +
-                         $"D{mod.Template.Difficulty} " +
-                         $"{mod.Template.EntryTerrain}" +
-                         (mod.Template.IsTransition ? $"→{mod.Template.ExitTerrain}" : "") +
-                         $" | X: {mod.WorldStartX:F0}→{mod.WorldEndX:F0} " +
-                         $"Y: {mod.EntryY:F0}→{mod.ExitY:F0}" +
-                         (mod.Template.HasJump ? $" [GAP {mod.ScaledGapWidth:F0}px]" : ""));
+                if (mod.Compound != null)
+                {
+                    var c = mod.Compound;
+                    string sections = string.Join(", ", c.Sections.ConvertAll(s => s.Type.ToString()));
+                    GD.Print($"  [{mod.SequenceIndex}] Compound D{c.Difficulty} " +
+                             $"{c.EntryTerrain}" +
+                             (c.HasTerrainTransition ? $"→{c.ExitTerrain}" : "") +
+                             $" | X: {mod.WorldStartX:F0}→{mod.WorldEndX:F0} " +
+                             $"Y: {mod.EntryY:F0}→{mod.ExitY:F0} " +
+                             $"[GAP {mod.ScaledGapWidth:F0}px] [{sections}]");
+                }
+                else
+                {
+                    GD.Print($"  [{mod.SequenceIndex}] {mod.Template.Shape} " +
+                             $"D{mod.Template.Difficulty} " +
+                             $"{mod.Template.EntryTerrain}" +
+                             (mod.Template.IsTransition ? $"→{mod.Template.ExitTerrain}" : "") +
+                             $" | X: {mod.WorldStartX:F0}→{mod.WorldEndX:F0} " +
+                             $"Y: {mod.EntryY:F0}→{mod.ExitY:F0}" +
+                             (mod.Template.HasJump ? $" [GAP {mod.ScaledGapWidth:F0}px]" : ""));
+                }
             }
             GD.Print("[TerrainManager] ═══════════════════════════════════");
         }
@@ -297,13 +321,13 @@ public partial class TerrainManager : Node2D
             }
 
             // Check if we're in this module's gap
-            if (mod.Template.HasJump && _nextSpawnX >= mod.GapStartX && _nextSpawnX < mod.GapEndX)
+            if (mod.HasJump && _nextSpawnX >= mod.GapStartX && _nextSpawnX < mod.GapEndX)
             {
                 // Spawn gap chunk and skip past it
                 float gapRemaining = mod.GapEndX - _nextSpawnX;
                 ActiveChunks.Add(new ChunkInstance
                 {
-                    Type = mod.Template.ExitTerrain,
+                    Type = mod.ModuleExitTerrain,
                     WorldX = _nextSpawnX,
                     Width = gapRemaining,
                     SceneNode = null,
@@ -350,11 +374,10 @@ public partial class TerrainManager : Node2D
         }
 
         // Determine terrain type at this position
-        float t = (_nextSpawnX - currentMod.WorldStartX) / currentMod.Length;
-        TerrainType terrainType = currentMod.Template.GetTerrainTypeAt(t);
+        TerrainType terrainType = currentMod.ActiveTerrainAt(_nextSpawnX);
 
-        // For gap modules, don't render surface geometry
-        if (currentMod.Template.Shape == TrackModule.ModuleShape.Gap)
+        // For gap modules, don't render surface geometry (legacy intro modules only)
+        if (currentMod.Template?.Shape == TrackModule.ModuleShape.Gap)
         {
             ActiveChunks.Add(new ChunkInstance
             {
@@ -443,10 +466,11 @@ public partial class TerrainManager : Node2D
                                          TerrainType terrainType,
                                          ModuleTrackGenerator.PlacedModule module)
     {
-        if (module.Template.ObstacleDensity <= 0f) return;
+        float obsDensity = module.Template?.ObstacleDensity ?? 0f;
+        if (obsDensity <= 0f) return;
 
         // Determine obstacle types to use
-        var allowedTypes = module.Template.AllowedObstacleTypes;
+        var allowedTypes = module.Template?.AllowedObstacleTypes;
         if (allowedTypes == null || allowedTypes.Length == 0)
         {
             // Default: all types allowed based on terrain
@@ -461,7 +485,7 @@ public partial class TerrainManager : Node2D
 
         // Probability-based spawning: each chunk rolls against density.
         // With density ~0.1 and ~8 chunks per module, yields 0-2 obstacles per module.
-        if (GD.Randf() > module.Template.ObstacleDensity) return;
+        if (GD.Randf() > obsDensity) return;
 
         // Spawn exactly 1 obstacle in this chunk
         float localX = GD.Randf() * chunkWidth;
