@@ -17,7 +17,7 @@ public partial class SkiController : VehicleBase
 
     public SkiController()
     {
-        MaxSpeed = 6000f;
+        MaxSpeed = 15000f;
     }
 
     // ── Physics Properties ───────────────────────────────────────────

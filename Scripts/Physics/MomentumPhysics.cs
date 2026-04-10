@@ -188,6 +188,12 @@ public static class MomentumPhysics
         float airDrag = PhysicsConstants.AirDragCoefficient * velocity.X * velocity.X;
         velocity.X -= airDrag * dt;
 
+        // Apply constant air deceleration — stronger when climbing, weaker when falling
+        float decelMultiplier = velocity.Y < 0f
+            ? PhysicsConstants.AirDecelClimbingMultiplier   // going up = more drag
+            : PhysicsConstants.AirDecelFallingMultiplier;   // falling = less drag
+        velocity.X -= PhysicsConstants.AirHorizontalDecel * decelMultiplier * dt;
+
         // Ensure X never goes negative (player always moves forward)
         if (velocity.X < PhysicsConstants.MinimumSpeed)
             velocity.X = PhysicsConstants.MinimumSpeed;

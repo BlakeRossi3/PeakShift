@@ -104,7 +104,7 @@ public partial class GameManager : Node
 		// GameOver → GameManager
 		if (_gameOver != null)
 		{
-			_gameOver.RetryPressed += ReturnToMenu;
+			_gameOver.RetryPressed += StartGame;
 			_gameOver.MenuPressed += ReturnToMenu;
 		}
 
@@ -176,7 +176,7 @@ public partial class GameManager : Node
 		if (_gameOver != null) _gameOver.Visible = false;
 		if (_pauseMenu != null) _pauseMenu.Visible = false;
 
-		// _avalancheWall?.Activate();
+		_avalancheWall?.Activate();
 		_audioManager?.PlayMusic();
 	}
 
@@ -184,7 +184,7 @@ public partial class GameManager : Node
 	{
 		if (_gameOver != null && _runManager != null)
 		{
-			_gameOver.ShowScore(_runManager.Score);
+			_gameOver.ShowResults(_runManager.Score, _runManager.Distance);
 		}
 		if (_hud != null) _hud.Visible = false;
 		_avalancheWall?.Deactivate();

@@ -102,16 +102,16 @@ public class DifficultyProfile
     // ── Compound Module Parameters ─────────────────────────────
 
     /// <summary>Minimum total compound module length at the start of a run.</summary>
-    public float CompoundLengthMinEarly { get; set; } = 8000f;
+    public float CompoundLengthMinEarly { get; set; } = 38000f;
 
     /// <summary>Maximum total compound module length at the start of a run.</summary>
-    public float CompoundLengthMaxEarly { get; set; } = 12000f;
+    public float CompoundLengthMaxEarly { get; set; } = 56000f;
 
     /// <summary>Minimum total compound module length at high difficulty.</summary>
-    public float CompoundLengthMinLate { get; set; } = 12000f;
+    public float CompoundLengthMinLate { get; set; } = 56000f;
 
     /// <summary>Maximum total compound module length at high difficulty.</summary>
-    public float CompoundLengthMaxLate { get; set; } = 20000f;
+    public float CompoundLengthMaxLate { get; set; } = 90000f;
 
     /// <summary>Distance at which compound module length reaches max range.</summary>
     public float CompoundLengthRampDistance { get; set; } = 20000f;

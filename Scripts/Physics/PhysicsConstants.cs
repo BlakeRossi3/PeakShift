@@ -15,7 +15,7 @@ public static class PhysicsConstants
     /// Reduces deceleration on inclines so player carries momentum over small hills.
     /// 0.35 = only 35% of gravity opposes the player going uphill.
     /// </summary>
-    public const float UphillGravityScale = 0.12f;
+    public const float UphillGravityScale = 0.35f;
 
     /// <summary>
     /// Slope attraction strength. On downhill slopes, a fraction of the
@@ -36,12 +36,24 @@ public static class PhysicsConstants
     /// <summary>Air drag while airborne (much lower than ground drag).</summary>
     public const float AirDragCoefficient = 0.00002f;
 
+    /// <summary>Constant horizontal deceleration while airborne (px/s^2). Simulates air resistance bleeding speed.</summary>
+    public const float AirHorizontalDecel = 18f;
+
+    /// <summary>Multiplier on air decel when player is climbing (velocity.Y &lt; 0). Going up = more drag.</summary>
+    public const float AirDecelClimbingMultiplier = 2.0f;
+
+    /// <summary>Multiplier on air decel when player is falling (velocity.Y &gt; 0). Falling = less drag.</summary>
+    public const float AirDecelFallingMultiplier = 0.3f;
+
+    /// <summary>Speed multiplier applied on landing (non-flip). Rewards clean landings with a small recovery.</summary>
+    public const float LandingSpeedRecovery = 1.05f;
+
     // ── Speed Limits ─────────────────────────────────────────────────
     /// <summary>Absolute minimum speed — player always moves forward at least this fast (px/s).</summary>
     public const float MinimumSpeed = 100f;
 
     /// <summary>Global terminal velocity cap (px/s).</summary>
-    public const float TerminalVelocity = 3000f;
+    public const float TerminalVelocity = 10000;
 
     /// <summary>Starting speed for new runs (px/s).</summary>
     public const float StartingSpeed = 450f;
@@ -145,13 +157,22 @@ public static class PhysicsConstants
     public const float FlipSuccessDragMultiplier = 0.5f;
 
     /// <summary>Upward velocity impulse applied when initiating a flip (px/s). Acts like an air-jump.</summary>
-    public const float FlipLaunchImpulse = -400f;
+    public const float FlipLaunchImpulse = -350f;
 
-    /// <summary>Gravity multiplier during flip (lower = floatier, more air time for tricks).</summary>
-    public const float FlipGravityMultiplier = 0.85f;
+    /// <summary>Impulse multiplier for the second flip in a jump (diminishing returns).</summary>
+    public const float FlipSecondImpulseMultiplier = 0.3f;
+
+    /// <summary>Gravity multiplier during flip (1.0 = normal gravity, no float exploit).</summary>
+    public const float FlipGravityMultiplier = 1.0f;
 
     /// <summary>Cooldown (seconds) before the player can initiate another flip.</summary>
     public const float FlipCooldown = 0.2f;
+
+    /// <summary>Maximum number of flips allowed per airborne session.</summary>
+    public const int MaxFlipsPerJump = 2;
+
+    /// <summary>Speed boost multiplier per additional flip landed (stacks with base boost).</summary>
+    public const float FlipMultiBonus = 0.06f;
 
     // ── Jump Clearance ─────────────────────────────────────────────
     // These parameters govern the "must-clear-the-gap" momentum rule.

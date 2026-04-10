@@ -12,7 +12,7 @@ public partial class BikeController : VehicleBase
 {
     public BikeController()
     {
-        MaxSpeed = 2000f;
+        MaxSpeed = 8000f;
     }
 
     // ── Physics Properties ───────────────────────────────────────────

@@ -15,21 +15,20 @@ public partial class PauseMenuController : Control
         _resumeButton = GetNodeOrNull<Button>("%ResumeButton");
         _quitButton = GetNodeOrNull<Button>("%QuitButton");
 
-        if (_resumeButton != null) _resumeButton.Pressed += OnResumePressed;
-        if (_quitButton != null) _quitButton.Pressed += OnQuitPressed;
+        if (_resumeButton != null)
+        {
+            _resumeButton.Pressed += OnResumePressed;
+            UITheme.StyleButton(_resumeButton);
+        }
+        if (_quitButton != null)
+        {
+            _quitButton.Pressed += OnQuitPressed;
+            UITheme.StyleButton(_quitButton, primary: false);
+        }
 
         Visible = false;
     }
 
-    private void OnResumePressed()
-    {
-        GD.Print("[PauseMenu] Resumed");
-        EmitSignal(SignalName.ResumePressed);
-    }
-
-    private void OnQuitPressed()
-    {
-        GD.Print("[PauseMenu] Quit pressed");
-        EmitSignal(SignalName.QuitPressed);
-    }
+    private void OnResumePressed() => EmitSignal(SignalName.ResumePressed);
+    private void OnQuitPressed() => EmitSignal(SignalName.QuitPressed);
 }

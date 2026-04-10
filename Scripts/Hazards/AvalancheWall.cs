@@ -19,16 +19,16 @@ public partial class AvalancheWall : Node2D
     // ── Tuning ──────────────────────────────────────────────────
 
     /// <summary>How far behind the player the wall starts (px).</summary>
-    [Export] public float InitialDistance { get; set; } = 800f;
+    [Export] public float InitialDistance { get; set; } = 2500f;
 
-    /// <summary>Starting speed of the avalanche wall (px/s).</summary>
-    [Export] public float StartSpeed { get; set; } = 280f;
+    /// <summary>Starting speed of the avalanche wall (px/s). 2000 px/s ≈ 200 km/h.</summary>
+    [Export] public float StartSpeed { get; set; } = 2000f;
 
     /// <summary>Speed acceleration (px/s²) — wall gets faster over time.</summary>
-    [Export] public float SpeedAcceleration { get; set; } = 2f;
+    [Export] public float SpeedAcceleration { get; set; } = 15f;
 
     /// <summary>Maximum wall speed cap (px/s).</summary>
-    [Export] public float MaxSpeed { get; set; } = 1400f;
+    [Export] public float MaxSpeed { get; set; } = 6000f;
 
     /// <summary>Width of the fog/gradient leading edge (px).</summary>
     [Export] public float FogWidth { get; set; } = 200f;
@@ -165,7 +165,8 @@ public partial class AvalancheWall : Node2D
             closedMass[massSamples] = ToLocal(new Vector2(WallX, bottomY));
             closedMass[massSamples + 1] = ToLocal(new Vector2(sampleStart, bottomY));
 
-            DrawPolygon(closedMass, new Color[] { new Color(0.92f, 0.94f, 0.98f, 1f) });
+            if (IsValidPolygon(closedMass))
+                DrawPolygon(closedMass, new Color[] { new Color(0.92f, 0.94f, 0.98f, 1f) });
         }
 
         // ── Draw fog gradient (WallX to WallX + FogWidth) ─────
@@ -194,7 +195,8 @@ public partial class AvalancheWall : Node2D
             };
 
             var fogColor = new Color(0.95f, 0.96f, 1f, alpha);
-            DrawPolygon(stripPoly, new Color[] { fogColor });
+            if (IsValidPolygon(stripPoly))
+                DrawPolygon(stripPoly, new Color[] { fogColor });
         }
     }
 
@@ -227,5 +229,17 @@ public partial class AvalancheWall : Node2D
     {
         Deactivate();
         Activate();
+    }
+
+    /// <summary>Check polygon has at least 3 non-collinear points to avoid triangulation errors.</summary>
+    private static bool IsValidPolygon(Vector2[] poly)
+    {
+        if (poly.Length < 3) return false;
+        for (int i = 2; i < poly.Length; i++)
+        {
+            float cross = (poly[1] - poly[0]).Cross(poly[i] - poly[0]);
+            if (Mathf.Abs(cross) > 0.01f) return true;
+        }
+        return false;
     }
 }

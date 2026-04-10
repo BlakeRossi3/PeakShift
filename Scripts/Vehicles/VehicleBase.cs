@@ -13,7 +13,7 @@ public abstract partial class VehicleBase : Node2D
 
     /// <summary>Maximum horizontal speed for this vehicle (px/s).</summary>
     [Export]
-    public float MaxSpeed { get; set; } = 10000f;
+    public float MaxSpeed { get; set; } = 100000f;
 
     // ── Physics Modifiers ────────────────────────────────────────────
 

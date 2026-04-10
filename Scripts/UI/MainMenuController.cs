@@ -14,6 +14,7 @@ public partial class MainMenuController : Control
 		if (_playButton != null)
 		{
 			_playButton.Pressed += OnPlayPressed;
+			UITheme.StyleButton(_playButton);
 		}
 	}
 

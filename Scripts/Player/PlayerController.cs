@@ -105,6 +105,9 @@ public partial class PlayerController : CharacterBody2D
 	// Flip cooldown (delay between successive flips)
 	private float _flipCooldownTimer;
 
+	// Tracks how many flip initiations have been used this airborne session
+	private int _flipsUsedThisJump;
+
 	// Tuck state
 	private bool _tuckInputHeld;
 
@@ -182,6 +185,9 @@ public partial class PlayerController : CharacterBody2D
 			}
 			else if (CurrentMoveState is MoveState.Airborne or MoveState.AirborneTucking)
 			{
+				if (_flipsUsedThisJump >= PhysicsConstants.MaxFlipsPerJump)
+					return; // No more flips allowed this jump
+
 				// Exit aerial tuck to flip
 				if (CurrentMoveState == MoveState.AirborneTucking)
 				{
@@ -190,13 +196,20 @@ public partial class PlayerController : CharacterBody2D
 				}
 				EnterFlipping();
 			}
-			// If already flipping, queue another flip (double-jump style)
+			// If already flipping, queue another flip (limited)
 			else if (CurrentMoveState == MoveState.Flipping)
 			{
+				if (_flipsUsedThisJump >= PhysicsConstants.MaxFlipsPerJump)
+					return; // No more flips allowed this jump
+
 				_targetFlipCount++;
-				_airVelocity.Y = Mathf.Min(_airVelocity.Y, PhysicsConstants.FlipLaunchImpulse);
+				_flipsUsedThisJump++;
+
+				// Diminishing impulse on subsequent flips
+				float impulse = PhysicsConstants.FlipLaunchImpulse * PhysicsConstants.FlipSecondImpulseMultiplier;
+				_airVelocity.Y = Mathf.Min(_airVelocity.Y, impulse);
 				_flipCooldownTimer = PhysicsConstants.FlipCooldown;
-				GD.Print($"[PlayerController] Queued flip #{_targetFlipCount} — air boost applied");
+				GD.Print($"[PlayerController] Queued flip #{_targetFlipCount} — reduced air boost applied");
 			}
 		}
 
@@ -493,6 +506,7 @@ public partial class PlayerController : CharacterBody2D
 	{
 		bool wasTucking = _tuckInputHeld;
 		CurrentMoveState = wasTucking ? MoveState.AirborneTucking : MoveState.Airborne;
+		_flipsUsedThisJump = 0;
 
 		// If going backwards (ski sliding), just fall — don't compute a backwards launch
 		if (MomentumSpeed < 0f)
@@ -524,15 +538,19 @@ public partial class PlayerController : CharacterBody2D
 		_flipCompleted = false;
 		_targetFlipCount = 1; // One press = one full flip
 		_flipCount = 0;
+		_flipsUsedThisJump++;
 
 		float flipMod = CurrentVehicle?.FlipSpeedModifier ?? 1.0f;
 		_flipAngularVelocity = MomentumPhysics.ComputeFlipAngularVelocity(MomentumSpeed, flipMod);
 
-		// Air-jump: boost upward when initiating flip
-		_airVelocity.Y = Mathf.Min(_airVelocity.Y, PhysicsConstants.FlipLaunchImpulse);
+		// Air-jump: boost upward when initiating flip (diminished for 2nd flip)
+		float impulse = PhysicsConstants.FlipLaunchImpulse;
+		if (_flipsUsedThisJump > 1)
+			impulse *= PhysicsConstants.FlipSecondImpulseMultiplier;
+		_airVelocity.Y = Mathf.Min(_airVelocity.Y, impulse);
 		_flipCooldownTimer = PhysicsConstants.FlipCooldown;
 
-		GD.Print($"[PlayerController] Flip initiated — angular vel: {_flipAngularVelocity:F1} rad/s, air impulse: {_airVelocity.Y:F0}");
+		GD.Print($"[PlayerController] Flip #{_flipsUsedThisJump} initiated — angular vel: {_flipAngularVelocity:F1} rad/s, impulse: {impulse:F0}");
 	}
 
 	private void OnLanding()
@@ -544,7 +562,8 @@ public partial class PlayerController : CharacterBody2D
 		Vector2 landNormal = _terrainManager != null
 			? _terrainManager.GetTerrainNormalAt(GlobalPosition.X)
 			: Vector2.Up;
-		MomentumSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal);
+		MomentumSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal)
+			* PhysicsConstants.LandingSpeedRecovery;
 		_airVelocity = Vector2.Zero;
 
 		SetSkiTucking(landIntoTuck);
@@ -563,7 +582,10 @@ public partial class PlayerController : CharacterBody2D
 				? _terrainManager.GetTerrainNormalAt(GlobalPosition.X)
 				: Vector2.Up;
 			float projectedSpeed = MomentumPhysics.ProjectLandingSpeed(_airVelocity, landNormal);
-			float boostedSpeed = projectedSpeed * PhysicsConstants.FlipSuccessSpeedBoost;
+			// Base boost + extra per additional flip (e.g. 1 flip = 1.12x, 2 flips = 1.18x)
+			float boostMultiplier = PhysicsConstants.FlipSuccessSpeedBoost
+				+ (_flipCount - 1) * PhysicsConstants.FlipMultiBonus;
+			float boostedSpeed = projectedSpeed * boostMultiplier;
 			MomentumSpeed = boostedSpeed;
 			_flipBonusTimer = PhysicsConstants.FlipSuccessDragWindowDuration;
 
@@ -692,6 +714,7 @@ public partial class PlayerController : CharacterBody2D
 		_flipCount = 0;
 		_flipBonusTimer = 0f;
 		_flipCooldownTimer = 0f;
+		_flipsUsedThisJump = 0;
 
 		_tuckInputHeld = false;
 		SetSkiTucking(false);

@@ -27,209 +27,6 @@ public class ProceduralModuleFactory
     }
 
     /// <summary>
-    /// Generate a Descent module with parameters derived from the guidance slope.
-    /// </summary>
-    /// <param name="distance">Current distance into the run.</param>
-    /// <param name="terrain">Terrain type for this module.</param>
-    /// <param name="flavor">Controls length/steepness: "normal", "short_steep", "long_gentle", "cruise".</param>
-    public TrackModule GenerateDescent(float distance, TerrainType terrain, string flavor = "normal")
-    {
-        float minLength, maxLength;
-        float slopeVarianceMin, slopeVarianceMax;
-
-        switch (flavor)
-        {
-            case "short_steep":
-                minLength = 800f;
-                maxLength = 1800f;
-                slopeVarianceMin = 1.3f;
-                slopeVarianceMax = 2.2f;
-                break;
-            case "long_gentle":
-                minLength = 2500f;
-                maxLength = 4500f;
-                slopeVarianceMin = 0.5f;
-                slopeVarianceMax = 0.9f;
-                break;
-            case "cruise":
-                minLength = 2000f;
-                maxLength = 3500f;
-                slopeVarianceMin = 0.6f;
-                slopeVarianceMax = 0.8f;
-                break;
-            default: // "normal"
-                minLength = 1200f;
-                maxLength = 3000f;
-                slopeVarianceMin = _difficulty.DescentDropVarianceMin;
-                slopeVarianceMax = _difficulty.DescentDropVarianceMax;
-                break;
-        }
-
-        float length = _rng.RandfRange(minLength, maxLength);
-        float guidedDrop = length * _difficulty.GetGuidanceSlopeTan(distance);
-        float variance = _rng.RandfRange(slopeVarianceMin, slopeVarianceMax);
-        float drop = guidedDrop * variance;
-
-        // Clamp to reasonable bounds
-        drop = Mathf.Clamp(drop, 80f, 2500f);
-
-        // Difficulty rating from steepness relative to guidance
-        int diff = variance > 1.4f ? 3 : variance > 1.0f ? 2 : 1;
-        diff = Mathf.Min(diff, _difficulty.GetMaxDifficulty(distance));
-
-        // Obstacle density scales with length and difficulty (sparse — avalanche is the main threat)
-        float obsDensity = Mathf.Clamp(length / 3000f * diff * 0.08f, 0f, 0.15f);
-
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Descent,
-            EntryTerrain = terrain,
-            ExitTerrain = terrain,
-            Length = length,
-            Drop = drop,
-            Difficulty = diff,
-            Weight = 1.0f,
-            HasJump = false,
-            ObstacleDensity = obsDensity,
-            AllowedObstacleTypes = GetObstacleTypes(terrain)
-        };
-    }
-
-    /// <summary>
-    /// Generate a Ramp module sized proportionally to the preceding descent.
-    /// </summary>
-    /// <param name="precedingDrop">The drop of the descent that precedes this ramp.</param>
-    /// <param name="precedingLength">The length of the preceding descent.</param>
-    /// <param name="distance">Current distance into the run.</param>
-    /// <param name="terrain">Current terrain type.</param>
-    /// <param name="withJump">Whether this ramp ends in a gap.</param>
-    public TrackModule GenerateRamp(float precedingDrop, float precedingLength,
-                                     float distance, TerrainType terrain, bool withJump)
-    {
-        // Ramp length: 40-65% of the preceding descent length (longer = gentler approach)
-        float lengthRatio = _rng.RandfRange(0.40f, 0.65f);
-        float length = Mathf.Clamp(precedingLength * lengthRatio, 900f, 3000f);
-
-        // Rise: fraction of preceding drop (ensures net downhill)
-        float riseRatio = Mathf.Lerp(
-            _difficulty.RampRiseToDropRatio,
-            _difficulty.RampRiseToDropRatioMax,
-            Mathf.Clamp(distance / 20000f, 0f, 1f)
-        );
-        float riseVariance = _rng.RandfRange(0.85f, 1.15f);
-        float rise = Mathf.Abs(precedingDrop) * riseRatio * riseVariance;
-        rise = Mathf.Clamp(rise, 150f, 700f);
-
-        // Gap width computed dynamically from preceding descent
-        float gapWidth = 0f;
-        if (withJump)
-        {
-            gapWidth = ComputeGapWidth(precedingDrop, precedingLength, distance);
-        }
-
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Ramp,
-            EntryTerrain = terrain,
-            ExitTerrain = terrain,
-            Length = length,
-            Rise = rise,
-            Drop = 0f,
-            Difficulty = Mathf.Min(3, _difficulty.GetMaxDifficulty(distance)),
-            Weight = 1.0f,
-            HasJump = withJump,
-            GapWidth = gapWidth,
-            ObstacleDensity = 0f
-        };
-    }
-
-    /// <summary>
-    /// Generate a Flat breather module.
-    /// </summary>
-    public TrackModule GenerateFlat(float distance, TerrainType terrain)
-    {
-        float length = _rng.RandfRange(300f, 700f);
-        // Slight drop following guidance slope but very gentle
-        float gentleDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.15f;
-        gentleDrop = Mathf.Clamp(gentleDrop, 10f, 80f);
-
-        float obsDensity = _rng.RandfRange(0.05f, 0.15f);
-
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Flat,
-            EntryTerrain = terrain,
-            ExitTerrain = terrain,
-            Length = length,
-            Drop = gentleDrop,
-            Rise = 0f,
-            Difficulty = 1,
-            Weight = 1.0f,
-            HasJump = false,
-            ObstacleDensity = obsDensity,
-            AllowedObstacleTypes = GetObstacleTypes(terrain)
-        };
-    }
-
-    /// <summary>
-    /// Generate a Bump/roller module.
-    /// </summary>
-    public TrackModule GenerateBump(float distance, TerrainType terrain)
-    {
-        float length = _rng.RandfRange(400f, 800f);
-        float guidedDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.6f;
-        float drop = Mathf.Clamp(guidedDrop, 30f, 200f);
-        float rise = _rng.RandfRange(80f, 220f);
-
-        float obsDensity = _rng.RandfRange(0.05f, 0.1f);
-
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.Bump,
-            EntryTerrain = terrain,
-            ExitTerrain = terrain,
-            Length = length,
-            Drop = drop,
-            Rise = rise,
-            Difficulty = Mathf.Min(2, _difficulty.GetMaxDifficulty(distance)),
-            Weight = 1.0f,
-            HasJump = false,
-            ObstacleDensity = obsDensity,
-            AllowedObstacleTypes = GetObstacleTypes(terrain)
-        };
-    }
-
-    /// <summary>
-    /// Generate a RollingHills module — multiple gentle hills for hill-to-hill jumping.
-    /// </summary>
-    public TrackModule GenerateRollingHills(float distance, TerrainType terrain)
-    {
-        float length = _rng.RandfRange(6000f, 8000f);
-        // Gentle net downhill — fraction of guidance slope
-        float guidedDrop = length * _difficulty.GetGuidanceSlopeTan(distance) * 0.35f;
-        float drop = Mathf.Clamp(guidedDrop, 30f, 250f);
-        // Hill amplitude — modest so crests give brief air, not extended flight
-        float rise = _rng.RandfRange(200f, 500f);
-
-        float obsDensity = _rng.RandfRange(0.03f, 0.08f);
-
-        return new TrackModule
-        {
-            Shape = TrackModule.ModuleShape.RollingHills,
-            EntryTerrain = terrain,
-            ExitTerrain = terrain,
-            Length = length,
-            Drop = drop,
-            Rise = rise,
-            Difficulty = Mathf.Min(2, _difficulty.GetMaxDifficulty(distance)),
-            Weight = 1.0f,
-            HasJump = false,
-            ObstacleDensity = obsDensity,
-            AllowedObstacleTypes = GetObstacleTypes(terrain)
-        };
-    }
-
-    /// <summary>
     /// Compute dynamic gap width based on the preceding descent geometry.
     /// Steeper/longer descents produce wider gaps (sub-linear via sqrt).
     /// </summary>
@@ -245,14 +42,6 @@ public class ProceduralModuleFactory
         float gap = gapFromDrop * gapMultiplier;
         return Mathf.Clamp(gap, 300f, 1200f);
     }
-
-    private static string[] GetObstacleTypes(TerrainType terrain) => terrain switch
-    {
-        TerrainType.Snow => new[] { "Rock", "Tree", "Log" },
-        TerrainType.Dirt => new[] { "Rock", "Tree", "Log" },
-        TerrainType.Ice => new[] { "Rock" },
-        _ => new[] { "Rock" }
-    };
 
     // ── Compound Module Generation ────────────────────────────────
 
@@ -275,10 +64,10 @@ public class ProceduralModuleFactory
         float guidanceSlopeTan = _difficulty.GetGuidanceSlopeTan(distance);
 
         // Budget length across sections
-        float landingLength = _rng.RandfRange(800f, 1500f);
-        float rampLength = _rng.RandfRange(1200f, 2500f);
+        float landingLength = _rng.RandfRange(3500f, 7000f);
+        float rampLength = _rng.RandfRange(5500f, 10000f);
         float interiorBudget = totalLength - landingLength - rampLength;
-        interiorBudget = Mathf.Max(interiorBudget, interiorCount * 1500f);
+        interiorBudget = Mathf.Max(interiorBudget, interiorCount * 7000f);
         var interiorLengths = DivideBudget(interiorBudget, interiorCount);
 
         // Pick interior section types
@@ -360,8 +149,8 @@ public class ProceduralModuleFactory
         }
 
         // ── Exit Ramp ────────────────────────────────────────────
-        float rampRise = _rng.RandfRange(300f, 700f);
-        float rampExitSlope = _rng.RandfRange(-0.35f, -0.55f); // upward = negative dy/dx
+        float rampRise = _rng.RandfRange(1800f, 4000f);
+        float rampExitSlope = _rng.RandfRange(-0.60f, -0.975f); // upward = negative dy/dx
 
         compound.Sections.Add(new SubSection
         {
@@ -414,20 +203,20 @@ public class ProceduralModuleFactory
             SubSectionType.RollingHills => new SectionParams
             {
                 Drop = length * guidanceSlopeTan * _rng.RandfRange(0.6f, 1.0f),
-                Rise = ClampRiseForSlope(length, _rng.RandfRange(40f, 80f),
-                    Mathf.Max(2, (int)(length / 3000f)), 0.20f),
+                Rise = ClampRiseForSlope(length, _rng.RandfRange(1800f, 3600f),
+                    Mathf.Max(2, (int)(length / 10000f)), 0.60f),
                 ExitSlope = guidanceSlopeTan * _rng.RandfRange(0.8f, 1.1f),
-                Periods = Mathf.Max(2, (int)(length / 3000f)),
+                Periods = Mathf.Max(2, (int)(length / 10000f)),
                 Difficulty = Mathf.Min(2, maxDiff)
             },
 
             SubSectionType.RockGarden => new SectionParams
             {
                 Drop = length * guidanceSlopeTan * _rng.RandfRange(0.7f, 1.0f),
-                Rise = ClampRiseForSlope(length, _rng.RandfRange(15f, 35f),
-                    Mathf.Max(3, (int)(length / 800f)), 0.18f),
+                Rise = ClampRiseForSlope(length, _rng.RandfRange(900f, 2100f),
+                    Mathf.Max(3, (int)(length / 3000f)), 0.50f),
                 ExitSlope = guidanceSlopeTan * _rng.RandfRange(0.8f, 1.1f),
-                Periods = Mathf.Max(3, (int)(length / 800f)),
+                Periods = Mathf.Max(3, (int)(length / 3000f)),
                 Difficulty = Mathf.Min(3, maxDiff)
             },
 
@@ -443,10 +232,10 @@ public class ProceduralModuleFactory
             SubSectionType.MogulField => new SectionParams
             {
                 Drop = length * guidanceSlopeTan * _rng.RandfRange(0.6f, 0.9f),
-                Rise = ClampRiseForSlope(length, _rng.RandfRange(20f, 50f),
-                    Mathf.Max(4, (int)(length / 500f)), 0.15f),
+                Rise = ClampRiseForSlope(length, _rng.RandfRange(1200f, 2700f),
+                    Mathf.Max(3, (int)(length / 2000f)), 0.48f),
                 ExitSlope = guidanceSlopeTan * _rng.RandfRange(0.8f, 1.0f),
-                Periods = Mathf.Max(4, (int)(length / 500f)),
+                Periods = Mathf.Max(3, (int)(length / 2000f)),
                 Difficulty = Mathf.Min(3, maxDiff)
             },
 
@@ -461,9 +250,9 @@ public class ProceduralModuleFactory
 
             SubSectionType.SteepChute => new SectionParams
             {
-                Drop = length * guidanceSlopeTan * _rng.RandfRange(1.2f, 1.8f),
+                Drop = length * guidanceSlopeTan * _rng.RandfRange(2.1f, 3.3f),
                 Rise = 0f,
-                ExitSlope = guidanceSlopeTan * _rng.RandfRange(1.0f, 1.4f),
+                ExitSlope = guidanceSlopeTan * _rng.RandfRange(1.8f, 2.4f),
                 Periods = 0,
                 Difficulty = Mathf.Min(4, maxDiff)
             },
@@ -471,9 +260,9 @@ public class ProceduralModuleFactory
             SubSectionType.PowderField => new SectionParams
             {
                 Drop = length * guidanceSlopeTan * _rng.RandfRange(0.5f, 0.8f),
-                Rise = ClampRiseForSlope(length, _rng.RandfRange(15f, 40f), 4, 0.12f),
+                Rise = ClampRiseForSlope(length, _rng.RandfRange(600f, 1500f), 3, 0.42f),
                 ExitSlope = guidanceSlopeTan * _rng.RandfRange(0.7f, 1.0f),
-                Periods = 4,
+                Periods = 3,
                 Difficulty = 1
             },
 
@@ -570,12 +359,12 @@ public class ProceduralModuleFactory
         for (int i = 0; i < count - 1; i++)
         {
             float avgPart = remaining / (count - i);
-            float minPart = Mathf.Max(avgPart * 0.5f, 1500f);
-            float maxPart = Mathf.Min(avgPart * 1.5f, 6000f);
+            float minPart = Mathf.Max(avgPart * 0.5f, 7000f);
+            float maxPart = Mathf.Min(avgPart * 1.5f, 28000f);
             lengths[i] = _rng.RandfRange(minPart, maxPart);
             remaining -= lengths[i];
         }
-        lengths[count - 1] = Mathf.Max(remaining, 1500f);
+        lengths[count - 1] = Mathf.Max(remaining, 7000f);
 
         return lengths;
     }
